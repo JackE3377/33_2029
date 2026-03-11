@@ -4,11 +4,11 @@
 
 # --- Core Framework ---
 streamlit>=1.40.0
-crewai>=0.80.0
+# crewai>=0.80.0  # Only needed for run_engines.py (local), not for dashboard
 
-# --- LLM APIs ---
-google-generativeai>=0.8.0
-openai>=1.50.0
+# --- LLM APIs (only for local engine execution) ---
+# google-generativeai>=0.8.0
+# openai>=1.50.0
 
 # --- Data & Finance ---
 yfinance>=0.2.40
@@ -18,8 +18,8 @@ numpy>=1.26.0
 # --- DB ---
 sqlalchemy>=2.0.0
 
-# --- Scheduling ---
-apscheduler>=3.10.0
+# --- Scheduling (only for local engine execution) ---
+# apscheduler>=3.10.0
 
 # --- Visualization ---
 plotly>=5.22.0
@@ -33,4 +33,4 @@ pydantic-settings>=2.3.0
 
 # --- Utilities ---
 python-dotenv>=1.0.0
-openpyxl>=3.1.0
+# openpyxl>=3.1.0  # Not needed for dashboard
