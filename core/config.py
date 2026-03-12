@@ -31,10 +31,45 @@ class Settings(BaseSettings):
 
     # -- LLM --
     gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.0-flash"
+    gemini_model_lite: str = "gemini-3.0-flash-lite"
 
     # -- Data APIs --
     fred_api_key: str = ""
     alpha_vantage_api_key: str = ""
+
+    # -- 한국수출입은행 API (무료 등록: koexim.go.kr) --
+    koexim_api_key: str = ""
+
+    # -- 은행 환전 우대율 (%) — 우대율이 높을수록 스프레드 작음 --
+    # 기본 전신환 편도 스프레드: USD ~1.0%, JPY ~1.5%
+    fx_base_spread_usd: float = 1.0
+    fx_base_spread_jpy: float = 1.5
+
+    bank_preferences: dict[str, float] = Field(
+        default_factory=lambda: {
+            "토스": 100.0,
+            "카카오뱅크": 100.0,
+            "키움증권": 95.0,
+            "하나증권": 90.0,
+            "하나은행": 70.0,
+            "국민은행": 50.0,
+        }
+    )
+    bank_preferences_jpy: dict[str, float] = Field(
+        default_factory=lambda: {
+            "토스": 100.0,
+            "카카오뱅크": 100.0,
+            "키움증권": 90.0,
+            "하나증권": 85.0,
+            "하나은행": 60.0,
+            "국민은행": 40.0,
+        }
+    )
+
+    # -- Index Screening --
+    index_screen_rsi_max: float = 40.0
+    index_screen_top_n_ai: int = 5
 
     # -- Engine 1: Tether Thresholds --
     kimchi_premium_sell_pct: float = 3.0

@@ -36,15 +36,16 @@ class AnalysisResult:
 
 # ── Gemini helper ─────────────────────────────────────────────
 
-def _call_gemini(prompt: str) -> str | None:
+def _call_gemini(prompt: str, use_lite: bool = False) -> str | None:
     """Call Gemini Flash and return text. Returns None on any failure."""
-    api_key = get_settings().gemini_api_key
-    if not api_key:
+    cfg = get_settings()
+    if not cfg.gemini_api_key:
         return None
     try:
         import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        genai.configure(api_key=cfg.gemini_api_key)
+        model_name = cfg.gemini_model_lite if use_lite else cfg.gemini_model
+        model = genai.GenerativeModel(model_name)
         resp = model.generate_content(prompt)
         return resp.text
     except Exception:
@@ -131,16 +132,18 @@ def analyze_stock(
     news = [NewsItem(title=t, link="", published="") for t in news_titles]
     ctx = _build_context(q, news)
 
-    # Try AI pipeline
+    # Try AI pipeline — use lite model for bull/bear, full model for synthesis
     bull_text = _call_gemini(
         f"You are a bullish equity analyst. Analyse this stock and list 3-5 key "
         f"growth catalysts, competitive advantages, and positive signals in 4-5 sentences. "
-        f"Be specific and cite data. Answer in Korean.\n\n{ctx}"
+        f"Be specific and cite data. Answer in Korean.\n\n{ctx}",
+        use_lite=True,
     )
     bear_text = _call_gemini(
         f"You are a bearish red-team analyst. Analyse this stock and list 3-5 key "
         f"risks, weaknesses, regulatory threats, and negative signals in 4-5 sentences. "
-        f"Be specific and cite data. Answer in Korean.\n\n{ctx}"
+        f"Be specific and cite data. Answer in Korean.\n\n{ctx}",
+        use_lite=True,
     )
 
     if bull_text and bear_text:
@@ -202,3 +205,24 @@ def analyze_watchlist(quotes: list[StockQuote], news_map: dict[str, list[NewsIte
 
     results.sort(key=lambda r: r.score, reverse=True)
     return results[:top_n]
+
+
+def analyze_screened_stocks(
+    screened: list,
+    news_map: dict[str, list[NewsItem]],
+    top_n: int = 5,
+) -> list[AnalysisResult]:
+    """AI analysis only for pre-screened top candidates (minimises Gemini calls)."""
+    results: list[AnalysisResult] = []
+    for s in screened[:top_n]:
+        news_titles = [n.title for n in news_map.get(s.symbol, [])]
+        raw = analyze_stock(
+            symbol=s.symbol, price=s.price, change_pct=s.change_pct,
+            rsi_14=s.rsi_14, weekly_rsi=s.weekly_rsi,
+            forward_pe=s.forward_pe, peg_ratio=s.peg_ratio,
+            free_cash_flow=s.free_cash_flow, debt_to_equity=s.debt_to_equity,
+            name=s.name, news_titles=news_titles,
+        )
+        results.append(AnalysisResult(**raw))
+    results.sort(key=lambda r: r.score, reverse=True)
+    return results

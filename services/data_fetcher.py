@@ -191,3 +191,233 @@ def fetch_usdt_premium(usd_krw: float) -> CryptoQuote:
     except Exception:
         pass
     return CryptoQuote()
+
+
+# ── Dollar Index (DXY) ────────────────────────────────────────
+
+@dataclass
+class DXYData:
+    price: float = 0.0
+    change_pct: float = 0.0
+    rsi_14: Optional[float] = None
+    sma_20: Optional[float] = None
+    sma_50: Optional[float] = None
+    high_52w: float = 0.0
+    low_52w: float = 0.0
+    drawdown_pct: float = 0.0      # from 52-week high
+    bounce_score: int = 50          # 0-100 (higher = more likely bounce)
+    bounce_label: str = "중립"
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_dxy() -> DXYData:
+    """Fetch Dollar Index with technical indicators and bounce assessment."""
+    d = DXYData()
+    try:
+        ticker = yf.Ticker("DX-Y.NYB")
+        hist = ticker.history(period="6mo")
+        if hist.empty:
+            return d
+        close = hist["Close"]
+        d.price = float(close.iloc[-1])
+        if len(close) >= 2:
+            prev = float(close.iloc[-2])
+            d.change_pct = round(((d.price - prev) / prev) * 100, 2) if prev else 0
+        d.rsi_14 = _calc_rsi(close, 14)
+        if len(close) >= 20:
+            d.sma_20 = round(float(close.rolling(20).mean().iloc[-1]), 2)
+        if len(close) >= 50:
+            d.sma_50 = round(float(close.rolling(50).mean().iloc[-1]), 2)
+        d.high_52w = float(close.max())
+        d.low_52w = float(close.min())
+        if d.high_52w > 0:
+            d.drawdown_pct = round(((d.price - d.high_52w) / d.high_52w) * 100, 2)
+
+        # Bounce assessment (rule-based)
+        score = 50
+        if d.rsi_14 is not None:
+            if d.rsi_14 < 30:
+                score += 25    # very oversold → high bounce chance
+            elif d.rsi_14 < 40:
+                score += 15
+            elif d.rsi_14 > 70:
+                score -= 20    # overbought → low bounce chance
+        if d.sma_20 and d.price < d.sma_20:
+            score += 10  # below 20-day MA → mean-reversion potential
+        if d.sma_50 and d.price < d.sma_50:
+            score += 5
+        if d.drawdown_pct < -5:
+            score += 10  # significant drop → bounce potential
+        d.bounce_score = max(0, min(100, score))
+
+        if d.bounce_score >= 70:
+            d.bounce_label = "반등 가능성 높음 🟢"
+        elif d.bounce_score >= 55:
+            d.bounce_label = "반등 가능성 있음 🟡"
+        elif d.bounce_score <= 30:
+            d.bounce_label = "추가 하락 가능 🔴"
+        else:
+            d.bounce_label = "중립 ⚪"
+    except Exception:
+        pass
+    return d
+
+
+# ── Japanese Yen (JPY/KRW) ────────────────────────────────────
+
+@dataclass
+class JPYData:
+    price: float = 0.0           # 1 JPY = X KRW
+    price_100: float = 0.0       # 100 JPY = X KRW
+    change_pct: float = 0.0
+    rsi_14: Optional[float] = None
+    sma_20: Optional[float] = None
+    sma_50: Optional[float] = None
+    high_52w: float = 0.0
+    low_52w: float = 0.0
+    drawdown_pct: float = 0.0
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_jpy() -> JPYData:
+    """Fetch JPY/KRW with technicals for yen trading signals."""
+    d = JPYData()
+    try:
+        ticker = yf.Ticker("JPYKRW=X")
+        hist = ticker.history(period="6mo")
+        if hist.empty:
+            return d
+        close = hist["Close"]
+        d.price = float(close.iloc[-1])
+        d.price_100 = round(d.price * 100, 2)
+        if len(close) >= 2:
+            prev = float(close.iloc[-2])
+            d.change_pct = round(((d.price - prev) / prev) * 100, 2) if prev else 0
+        d.rsi_14 = _calc_rsi(close, 14)
+        if len(close) >= 20:
+            d.sma_20 = round(float(close.rolling(20).mean().iloc[-1]) * 100, 2)
+        if len(close) >= 50:
+            d.sma_50 = round(float(close.rolling(50).mean().iloc[-1]) * 100, 2)
+        d.high_52w = round(float(close.max()) * 100, 2)
+        d.low_52w = round(float(close.min()) * 100, 2)
+        if d.high_52w > 0:
+            d.drawdown_pct = round(((d.price_100 - d.high_52w) / d.high_52w) * 100, 2)
+    except Exception:
+        pass
+    return d
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_koexim_rates(cur_unit: str = "USD") -> Optional[tuple[float, float, float]]:
+    """Fetch official rates from 한국수출입은행 API.
+
+    Returns (매매기준율, TTS, TTB) or None if unavailable.
+    """
+    cfg = get_settings()
+    if not cfg.koexim_api_key:
+        return None
+    try:
+        url = "https://www.koexim.go.kr/site/program/financial/exchangeJSON"
+        today = datetime.now().strftime("%Y%m%d")
+        resp = requests.get(url, params={
+            "authkey": cfg.koexim_api_key,
+            "searchdate": today,
+            "data": "AP01",
+        }, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        for item in data:
+            if item.get("cur_unit") == cur_unit:
+                def _p(v: str) -> float:
+                    return float(v.replace(",", ""))
+                return (_p(item["deal_bas_r"]), _p(item["tts"]), _p(item["ttb"]))
+    except Exception:
+        pass
+    return None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_bank_rates_jpy(base_jpy_krw: float) -> list['BankRate']:
+    """Compute bank JPY rates using 우대율 model (100엔 기준)."""
+    cfg = get_settings()
+    base_100 = base_jpy_krw * 100
+    base_spread = cfg.fx_base_spread_jpy
+
+    # Try KOEXIM for official JPY TTS/TTB
+    koexim = _fetch_koexim_rates("JPY(100)")
+    if koexim:
+        _, tts, ttb = koexim
+        tts_gap = tts - base_100
+        ttb_gap = base_100 - ttb
+    else:
+        tts_gap = base_100 * base_spread / 100
+        ttb_gap = base_100 * base_spread / 100
+
+    rates: list['BankRate'] = []
+    for name, pref in cfg.bank_preferences_jpy.items():
+        discount = pref / 100
+        buy = round(base_100 + tts_gap * (1 - discount), 2)
+        sell = round(base_100 - ttb_gap * (1 - discount), 2)
+        actual_spread = round((buy - sell) / base_100 * 100, 4) if base_100 > 0 else 0
+        rates.append(BankRate(
+            name=name, buy_rate=buy, sell_rate=sell, spread_pct=actual_spread,
+        ))
+    if rates:
+        best_buy = min(rates, key=lambda r: r.buy_rate)
+        best_sell = max(rates, key=lambda r: r.sell_rate)
+        best_buy.recommendation = "💰 매수 최저가"
+        best_sell.recommendation = "💵 매도 최고가"
+    return rates
+
+
+# ── Bank Exchange Rates ───────────────────────────────────────
+
+@dataclass
+class BankRate:
+    name: str = ""
+    buy_rate: float = 0.0      # 달러 살 때 (고객이 원화→달러)
+    sell_rate: float = 0.0     # 달러 팔 때 (고객이 달러→원화)
+    spread_pct: float = 0.0
+    recommendation: str = ""   # "매수 유리" / "매도 유리" / ""
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_bank_rates(base_usd_krw: float) -> list[BankRate]:
+    """Compute bank exchange rates using 우대율 model.
+
+    Formula per institution:
+      buy  = 기준율 + (TTS - 기준율) × (1 - 우대율/100)
+      sell = 기준율 - (기준율 - TTB) × (1 - 우대율/100)
+    100% 우대 → buy = sell = 기준율 (토스, 카카오뱅크)
+    """
+    cfg = get_settings()
+    base_spread = cfg.fx_base_spread_usd
+
+    # Try KOEXIM for official TTS/TTB
+    koexim = _fetch_koexim_rates("USD")
+    if koexim:
+        _, tts, ttb = koexim
+        tts_gap = tts - base_usd_krw
+        ttb_gap = base_usd_krw - ttb
+    else:
+        # Fallback: estimate spread from base rate
+        tts_gap = base_usd_krw * base_spread / 100
+        ttb_gap = base_usd_krw * base_spread / 100
+
+    rates: list[BankRate] = []
+    for name, pref in cfg.bank_preferences.items():
+        discount = pref / 100
+        buy = round(base_usd_krw + tts_gap * (1 - discount), 2)
+        sell = round(base_usd_krw - ttb_gap * (1 - discount), 2)
+        actual_spread = round((buy - sell) / base_usd_krw * 100, 4) if base_usd_krw > 0 else 0
+        rates.append(BankRate(
+            name=name, buy_rate=buy, sell_rate=sell, spread_pct=actual_spread,
+        ))
+
+    if rates:
+        best_buy = min(rates, key=lambda r: r.buy_rate)
+        best_sell = max(rates, key=lambda r: r.sell_rate)
+        best_buy.recommendation = "💰 매수 최저가"
+        best_sell.recommendation = "💵 매도 최고가"
+
+    return rates

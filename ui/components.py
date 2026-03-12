@@ -115,3 +115,70 @@ def analysis_card(title: str, body: str):
         f'</div>'
     )
 
+
+# ── Signal Card (OFF / ON / URGENT) ──────────────────────────
+
+def signal_card(
+    icon: str,
+    title: str,
+    label: str,
+    detail: str = "",
+    urgency: int = 0,
+    theme: str = "",
+):
+    """Render a signal card with urgency-based styling.
+
+    urgency: 0=OFF (grey), 1=관심, 2=액션(ON), 3=긴급(URGENT)
+    theme: sc-tether | sc-dollar | sc-bank | sc-stock | sc-rebal
+    """
+    if urgency >= 3:
+        state_cls = "sc-urgent"
+    elif urgency >= 1:
+        state_cls = "sc-on"
+    else:
+        state_cls = ""
+    detail_html = f'<div class="sc-detail">{detail}</div>' if detail else ""
+    _html(
+        f'<div class="sc {state_cls} {theme}">'
+        f'<div class="sc-icon">{icon}</div>'
+        f'<div class="sc-title">{title}</div>'
+        f'<div class="sc-label">{label}</div>'
+        f'{detail_html}'
+        f'</div>'
+    )
+
+
+def signal_card_html(
+    icon: str,
+    title: str,
+    label: str,
+    detail: str = "",
+    urgency: int = 0,
+    theme: str = "",
+) -> str:
+    """Return compact signal card HTML with GO/WAIT badge."""
+    if urgency >= 3:
+        state_cls = "sc-urgent"
+        badge = '<span class="sc-badge sc-badge-go-urgent">GO</span>'
+    elif urgency >= 2:
+        state_cls = "sc-on"
+        badge = '<span class="sc-badge sc-badge-go">GO</span>'
+    elif urgency >= 1:
+        state_cls = "sc-on"
+        badge = '<span class="sc-badge sc-badge-wait">관심</span>'
+    else:
+        state_cls = ""
+        badge = '<span class="sc-badge sc-badge-wait">WAIT</span>'
+    detail_html = f'<div class="sc-detail">{detail}</div>' if detail else ""
+    return (
+        f'<div class="sc {state_cls} {theme}">'
+        f'<div class="sc-left"><span class="sc-icon">{icon}</span></div>'
+        f'<div class="sc-body">'
+        f'<div class="sc-title">{title}</div>'
+        f'<div class="sc-label">{label}</div>'
+        f'{detail_html}'
+        f'</div>'
+        f'{badge}'
+        f'</div>'
+    )
+

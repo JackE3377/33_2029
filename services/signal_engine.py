@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.config import get_settings
-from services.data_fetcher import MacroData, StockQuote, CryptoQuote
+from services.data_fetcher import MacroData, StockQuote, CryptoQuote, DXYData, JPYData
 
 
 # ── Engine 1: Tether ──────────────────────────────────────────
@@ -43,6 +43,106 @@ def calc_tether_signal(macro: MacroData, crypto: CryptoQuote) -> TetherSignal:
         sig.alerts.append(f"🟢 테더 매수 (역프 {crypto.kimchi_premium_pct:+.2f}%) — 달러 전환 기회")
     if macro.usd_krw >= cfg.usdkrw_block_threshold:
         sig.alerts.append(f"⚠️ 환전 금지 구간 (USD/KRW {macro.usd_krw:,.0f}원 ≥ {cfg.usdkrw_block_threshold:,.0f}원)")
+    return sig
+
+
+# ── Engine 1b: Dollar Trading ─────────────────────────────────
+
+@dataclass
+class DollarSignal:
+    dxy_price: float = 0.0
+    dxy_rsi: float | None = None
+    usd_krw: float = 0.0
+    action: str = "HOLD"       # BUY_USD / SELL_USD / HOLD
+    urgency: int = 0           # 0=OFF, 1=관심, 2=액션, 3=긴급
+    label: str = "관망"
+    detail: str = ""
+
+
+def calc_dollar_signal(dxy: DXYData, macro: MacroData) -> DollarSignal:
+    sig = DollarSignal(
+        dxy_price=dxy.price,
+        dxy_rsi=dxy.rsi_14,
+        usd_krw=macro.usd_krw,
+    )
+    rsi = dxy.rsi_14
+    if rsi is None:
+        return sig
+
+    if rsi < 30:
+        sig.action = "BUY_USD"
+        sig.urgency = 3
+        sig.label = "달러 매수 적기"
+        sig.detail = f"DXY RSI {rsi:.0f} 과매도 · 반등 확률 {dxy.bounce_score}/100"
+    elif rsi < 40:
+        sig.action = "BUY_USD"
+        sig.urgency = 2
+        sig.label = "달러 매수 검토"
+        sig.detail = f"DXY RSI {rsi:.0f} 저점 접근 · {dxy.bounce_label}"
+    elif rsi > 70:
+        sig.action = "SELL_USD"
+        sig.urgency = 3
+        sig.label = "달러 매도 적기"
+        sig.detail = f"DXY RSI {rsi:.0f} 과매수 · 추가 상승 제한적"
+    elif rsi > 60:
+        sig.action = "SELL_USD"
+        sig.urgency = 1
+        sig.label = "달러 매도 관심"
+        sig.detail = f"DXY RSI {rsi:.0f} 고점 접근"
+    else:
+        sig.label = "관망"
+        sig.detail = f"DXY {dxy.price:.1f} · RSI {rsi:.0f} 중립"
+
+    return sig
+
+
+# ── Engine 1c: Yen Trading ────────────────────────────────────
+
+@dataclass
+class YenSignal:
+    jpy_krw: float = 0.0
+    jpy_rsi: float | None = None
+    action: str = "HOLD"       # BUY_JPY / SELL_JPY / HOLD
+    urgency: int = 0           # 0=OFF, 1=관심, 2=액션, 3=긴급
+    label: str = "관망"
+    detail: str = ""
+
+
+def calc_yen_signal(jpy: JPYData) -> YenSignal:
+    sig = YenSignal(
+        jpy_krw=jpy.price,
+        jpy_rsi=jpy.rsi_14,
+    )
+    rsi = jpy.rsi_14
+    if rsi is None:
+        return sig
+
+    price_100 = jpy.price_100 or round(jpy.price * 100, 1)
+
+    if rsi < 30:
+        sig.action = "BUY_JPY"
+        sig.urgency = 3
+        sig.label = "엔화 매수 적기"
+        sig.detail = f"100엔 ₩{price_100:,.0f} · RSI {rsi:.0f} 과매도"
+    elif rsi < 40:
+        sig.action = "BUY_JPY"
+        sig.urgency = 2
+        sig.label = "엔화 매수 검토"
+        sig.detail = f"100엔 ₩{price_100:,.0f} · RSI {rsi:.0f} 저점 접근"
+    elif rsi > 70:
+        sig.action = "SELL_JPY"
+        sig.urgency = 3
+        sig.label = "엔화 매도 적기"
+        sig.detail = f"100엔 ₩{price_100:,.0f} · RSI {rsi:.0f} 과매수"
+    elif rsi > 60:
+        sig.action = "SELL_JPY"
+        sig.urgency = 1
+        sig.label = "엔화 매도 관심"
+        sig.detail = f"100엔 ₩{price_100:,.0f} · RSI {rsi:.0f} 고점 접근"
+    else:
+        sig.label = "관망"
+        sig.detail = f"100엔 ₩{price_100:,.0f} · RSI {rsi:.0f} 중립"
+
     return sig
 
 
