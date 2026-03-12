@@ -1,5 +1,5 @@
 # ============================================================
-# GEM Protocol v2 — Core Settings
+# GEM Protocol v3 — Core Settings
 # ============================================================
 from __future__ import annotations
 
@@ -31,8 +31,8 @@ class Settings(BaseSettings):
 
     # -- LLM --
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.0-flash"
-    gemini_model_lite: str = "gemini-3.0-flash-lite"
+    gemini_model: str = "gemini-3-flash-preview"
+    gemini_model_lite: str = "gemini-3-flash-preview"
 
     # -- Data APIs --
     fred_api_key: str = ""
@@ -41,44 +41,19 @@ class Settings(BaseSettings):
     # -- 한국수출입은행 API (무료 등록: koexim.go.kr) --
     koexim_api_key: str = ""
 
-    # -- 은행 환전 우대율 (%) — 우대율이 높을수록 스프레드 작음 --
-    # 기본 전신환 편도 스프레드: USD ~1.0%, JPY ~1.5%
-    fx_base_spread_usd: float = 1.0
-    fx_base_spread_jpy: float = 1.5
-
-    bank_preferences: dict[str, float] = Field(
-        default_factory=lambda: {
-            "토스": 95.0,
-            "카카오뱅크": 90.0,
-            "스위치원": 95.0,
-            "키움증권": 95.0,
-            "하나증권": 90.0,
-            "하나은행": 70.0,
-            "우리은행": 50.0,
-            "국민은행": 50.0,
-        }
-    )
-    bank_preferences_jpy: dict[str, float] = Field(
-        default_factory=lambda: {
-            "토스": 90.0,
-            "카카오뱅크": 85.0,
-            "스위치원": 90.0,
-            "키움증권": 85.0,
-            "하나증권": 80.0,
-            "하나은행": 55.0,
-            "우리은행": 45.0,
-            "국민은행": 35.0,
-        }
-    )
+    # -- FX Split Buy/Sell Intervals (원) --
+    fx_split_buy_interval_usd: float = 4.5
+    fx_split_sell_interval_usd: float = 3.0
+    fx_split_buy_interval_jpy: float = 3.0
+    fx_split_sell_interval_jpy: float = 2.0
 
     # -- Index Screening --
     index_screen_rsi_max: float = 40.0
     index_screen_top_n_ai: int = 5
 
     # -- Engine 1: Tether Thresholds --
-    kimchi_premium_sell_pct: float = 3.0
-    kimchi_premium_buy_pct: float = -1.0
-    usdkrw_block_threshold: float = 1400.0
+    kimchi_premium_sell_pct: float = 2.0
+    kimchi_premium_buy_pct: float = -0.5
 
     # -- Engine 2: Magic Split Screening --
     forward_pe_max: float = 15.0
@@ -107,6 +82,7 @@ class Settings(BaseSettings):
     weekly_rsi_oversold: float = 30.0
     nasdaq_crash_pct: float = -3.0
     rebalance_deviation_pct: float = 5.0
+    momentum_lookback_months: int = 12
 
     # -- Auto-refresh (seconds) --
     refresh_interval_sec: int = 300

@@ -1,5 +1,5 @@
 # ============================================================
-# GEM Protocol v2 — 3-Agent Stock Analyst (Bull / Bear / Synthesis)
+# GEM Protocol v3 — 3-Agent Stock Analyst (Bull / Bear / Synthesis)
 # ============================================================
 """
 Uses Google Gemini to run a 3-agent analysis pipeline:
@@ -37,16 +37,15 @@ class AnalysisResult:
 # ── Gemini helper ─────────────────────────────────────────────
 
 def _call_gemini(prompt: str, use_lite: bool = False) -> str | None:
-    """Call Gemini Flash and return text. Returns None on any failure."""
+    """Call Gemini via google.genai SDK. Returns None on any failure."""
     cfg = get_settings()
     if not cfg.gemini_api_key:
         return None
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=cfg.gemini_api_key)
+        from google import genai
+        client = genai.Client(api_key=cfg.gemini_api_key)
         model_name = cfg.gemini_model_lite if use_lite else cfg.gemini_model
-        model = genai.GenerativeModel(model_name)
-        resp = model.generate_content(prompt)
+        resp = client.models.generate_content(model=model_name, contents=prompt)
         return resp.text
     except Exception:
         return None

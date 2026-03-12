@@ -1,5 +1,5 @@
 # ============================================================
-# GEM Protocol v2 — Market Data Fetcher
+# GEM Protocol v3 — Market Data Fetcher
 # ============================================================
 """
 Data sources:
@@ -71,6 +71,17 @@ def _calc_rsi(prices: pd.Series, period: int = 14) -> Optional[float]:
         return 100.0
     rs = avg_gain / avg_loss
     return round(100 - (100 / (1 + rs)), 2)
+
+
+def _find_support_resistance(close: pd.Series, window: int = 20) -> tuple[float, float]:
+    """Find short-term support/resistance from rolling min/max."""
+    if len(close) < window:
+        recent = close
+    else:
+        recent = close.iloc[-window:]
+    support = float(recent.min())
+    resistance = float(recent.max())
+    return support, resistance
 
 
 # ── Fetchers ──────────────────────────────────────────────────
@@ -307,120 +318,77 @@ def fetch_jpy() -> JPYData:
     return d
 
 
-# ── Bank Exchange Rates ───────────────────────────────────────
+# ── FX Intraday (5-min bars for split buy/sell) ───────────────
 
 @dataclass
-class BankRate:
-    name: str = ""
-    buy_rate: float = 0.0      # 달러 살 때 (고객이 원화→달러) = TTS 우대 적용
-    sell_rate: float = 0.0     # 달러 팔 때 (고객이 달러→원화) = TTB 우대 적용
-    spread_pct: float = 0.0
-    recommendation: str = ""
+class FXIntraday:
+    symbol: str = ""           # "USD" or "JPY"
+    current: float = 0.0      # current price (KRW per unit)
+    rsi_5m: Optional[float] = None   # RSI on 5-min bars
+    sma_20: Optional[float] = None   # 20-bar SMA (5min)
+    sma_50: Optional[float] = None   # 50-bar SMA (5min)
+    support: float = 0.0      # short-term support
+    resistance: float = 0.0   # short-term resistance
+    high_today: float = 0.0
+    low_today: float = 0.0
+    market_open: bool = True
 
 
-@dataclass
-class _OfficialFXRate:
-    """하나은행 고시 환율 (다음 금융 API 경유)."""
-    base_price: float = 0.0    # 매매기준율
-    tts: float = 0.0           # 전신환 매도율 (고객이 살 때)
-    ttb: float = 0.0           # 전신환 매수율 (고객이 팔 때)
+@st.cache_data(ttl=120, show_spinner=False)
+def fetch_fx_intraday(yf_symbol: str, label: str = "USD", multiplier: float = 1.0) -> FXIntraday:
+    """Fetch 5-min intraday FX data for split buy/sell signals.
 
-
-@st.cache_data(ttl=300, show_spinner=False)
-def _fetch_official_fx() -> dict[str, _OfficialFXRate]:
-    """다음 금융 API에서 하나은행 고시 환율 조회 (USD, JPY).
-
-    Returns dict keyed by currency code, e.g. {"USD": ..., "JPY": ...}.
+    yf_symbol: e.g. "KRW=X" (USD/KRW) or "JPYKRW=X" (JPY/KRW)
+    multiplier: 1.0 for USD, 100.0 for JPY (100엔 기준)
     """
-    result: dict[str, _OfficialFXRate] = {}
+    d = FXIntraday(symbol=label)
     try:
-        resp = requests.get(
-            "https://finance.daum.net/api/exchanges/summaries",
-            params={"fieldType": "exchange"},
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "Referer": "https://finance.daum.net/exchanges",
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
-        for item in resp.json().get("data", []):
-            code = item.get("currencyCode", "")
-            if code in ("USD", "JPY"):
-                unit = item.get("currencyUnit", 1)
-                result[code] = _OfficialFXRate(
-                    base_price=float(item.get("basePrice", 0)),
-                    tts=float(item.get("ttSellingPrice", 0)),
-                    ttb=float(item.get("ttBuyingPrice", 0)),
-                )
+        ticker = yf.Ticker(yf_symbol)
+        hist = ticker.history(period="5d", interval="5m")
+        if hist.empty:
+            d.market_open = False
+            return d
+        close = hist["Close"].dropna() * multiplier
+        if close.empty:
+            d.market_open = False
+            return d
+
+        d.current = round(float(close.iloc[-1]), 2)
+        d.rsi_5m = _calc_rsi(close, 14)
+
+        if len(close) >= 20:
+            d.sma_20 = round(float(close.rolling(20).mean().iloc[-1]), 2)
+        if len(close) >= 50:
+            d.sma_50 = round(float(close.rolling(50).mean().iloc[-1]), 2)
+
+        d.support, d.resistance = _find_support_resistance(close, window=40)
+
+        # Today's high/low
+        today = close.index[-1].date() if hasattr(close.index[-1], 'date') else None
+        if today:
+            today_data = close[close.index.date == today]
+            if not today_data.empty:
+                d.high_today = round(float(today_data.max()), 2)
+                d.low_today = round(float(today_data.min()), 2)
+        if d.high_today == 0:
+            d.high_today = d.resistance
+            d.low_today = d.support
+
+        # Check if data is stale (>30 min gap → market likely closed)
+        last_ts = close.index[-1]
+        if hasattr(last_ts, 'tz_localize'):
+            pass
+        now_utc = datetime.now(timezone.utc)
+        try:
+            last_aware = last_ts.to_pydatetime()
+            if last_aware.tzinfo is None:
+                import pytz
+                last_aware = pytz.utc.localize(last_aware)
+            gap_minutes = (now_utc - last_aware).total_seconds() / 60
+            d.market_open = gap_minutes < 30
+        except Exception:
+            d.market_open = True
+
     except Exception:
-        pass
-    return result
-
-
-def _build_bank_rates(
-    base_price: float,
-    tts: float,
-    ttb: float,
-    preferences: dict[str, float],
-    fallback_spread: float,
-) -> list[BankRate]:
-    """기준율 + TTS/TTB + 우대율로 각 기관 환율 계산.
-
-    buy  = 기준율 + (TTS - 기준율) × (1 - 우대율/100)
-    sell = 기준율 - (기준율 - TTB) × (1 - 우대율/100)
-    """
-    tts_gap = tts - base_price if tts > 0 else base_price * fallback_spread / 100
-    ttb_gap = base_price - ttb if ttb > 0 else base_price * fallback_spread / 100
-
-    rates: list[BankRate] = []
-    for name, pref in preferences.items():
-        discount = pref / 100
-        buy = round(base_price + tts_gap * (1 - discount), 2)
-        sell = round(base_price - ttb_gap * (1 - discount), 2)
-        actual_spread = round((buy - sell) / base_price * 100, 4) if base_price > 0 else 0
-        rates.append(BankRate(
-            name=name, buy_rate=buy, sell_rate=sell, spread_pct=actual_spread,
-        ))
-
-    if rates:
-        best_buy = min(rates, key=lambda r: r.buy_rate)
-        best_sell = max(rates, key=lambda r: r.sell_rate)
-        best_buy.recommendation = "\U0001f4b0 매수 최저가"
-        best_sell.recommendation = "\U0001f4b5 매도 최고가"
-
-    return rates
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_bank_rates(base_usd_krw: float) -> list[BankRate]:
-    """은행별 USD 환율 — 하나은행 고시 TTS/TTB + 우대율 적용."""
-    cfg = get_settings()
-    official = _fetch_official_fx()
-    usd = official.get("USD")
-    if usd and usd.base_price > 0:
-        base = usd.base_price
-        tts = usd.tts
-        ttb = usd.ttb
-    else:
-        base = base_usd_krw
-        tts = 0.0
-        ttb = 0.0
-    return _build_bank_rates(base, tts, ttb, cfg.bank_preferences, cfg.fx_base_spread_usd)
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_bank_rates_jpy(base_jpy_krw: float) -> list[BankRate]:
-    """은행별 JPY 환율 — 하나은행 고시 TTS/TTB + 우대율 적용 (100엔 기준)."""
-    cfg = get_settings()
-    official = _fetch_official_fx()
-    jpy = official.get("JPY")
-    if jpy and jpy.base_price > 0:
-        base = jpy.base_price      # already per 100 yen from Daum
-        tts = jpy.tts
-        ttb = jpy.ttb
-    else:
-        base = base_jpy_krw * 100
-        tts = 0.0
-        ttb = 0.0
-    return _build_bank_rates(base, tts, ttb, cfg.bank_preferences_jpy, cfg.fx_base_spread_jpy)
+        d.market_open = False
+    return d

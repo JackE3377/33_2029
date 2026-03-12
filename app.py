@@ -1,11 +1,12 @@
 # ============================================================
-# GEM Protocol v2 — Zero PII Quant Signal Dashboard
+# GEM Protocol v3 — Zero PII Quant Signal Dashboard
 # ============================================================
 """
 streamlit run app.py
 
-4-tab dashboard: Signal, Macro, Magic Split, Warehouse LAA.
-Zero personal data.
+3-tab dashboard: 종합 시그널, 주식 탐색, Warehouse LAA.
+Reads pre-computed results from SQLite (populated by run_engines.py).
+Falls back to live computation when DB cache is stale.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import streamlit as st
 
 # Must be the first Streamlit command
 st.set_page_config(
-    page_title="GEM Protocol v2",
+    page_title="GEM Protocol v3",
     page_icon="\U0001f48e",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -28,65 +29,104 @@ from ui.styles import DARK_CSS
 st.markdown(DARK_CSS, unsafe_allow_html=True)
 
 
-# ── Data loaders ─────────────────────────────────────────────
+# ── DB-first data loaders ────────────────────────────────────
 
-@st.cache_data(ttl=300, show_spinner="\uc2e0\ud638 \ub370\uc774\ud130 \ub85c\ub529 \uc911\u2026")
+from services.cache_store import load_latest, FAST_SIGNALS, SLOW_STOCKS, WAREHOUSE
+from services.data_fetcher import (
+    MacroData, CryptoQuote, DXYData, FXIntraday,
+)
+from services.signal_engine import (
+    TetherSignal, DollarSignal, FXSplitSignal, WarehouseSignal, MagicSignal,
+)
+from services.stock_analyst import AnalysisResult
+from services.data_fetcher import StockQuote
+from services.index_scanner import ScreenedStock
+
+
+def _rebuild_dataclass(cls, d: dict):
+    """Safely reconstruct a dataclass from a dict, ignoring extra keys."""
+    import dataclasses
+    fields = {f.name for f in dataclasses.fields(cls)}
+    return cls(**{k: v for k, v in d.items() if k in fields})
+
+
+@st.cache_data(ttl=60, show_spinner=False)
 def _load_signals():
-    """Fast path: signal dashboard data only (~5-8s)."""
+    """Read FAST signals from DB. Fallback to live fetch if stale."""
+    cached = load_latest(FAST_SIGNALS, max_age_seconds=600)
+    if cached:
+        return {
+            "crypto": _rebuild_dataclass(CryptoQuote, cached["crypto"]),
+            "dxy": _rebuild_dataclass(DXYData, cached["dxy"]),
+            "tether_sig": _rebuild_dataclass(TetherSignal, cached["tether_sig"]),
+            "dollar_sig": _rebuild_dataclass(DollarSignal, cached["dollar_sig"]),
+            "usd_split": _rebuild_dataclass(FXSplitSignal, cached["usd_split"]),
+            "jpy_split": _rebuild_dataclass(FXSplitSignal, cached["jpy_split"]),
+        }
+
+    # Fallback: live computation
     from services.data_fetcher import (
         fetch_macro, fetch_usdt_premium,
-        fetch_dxy, fetch_bank_rates, fetch_jpy, fetch_bank_rates_jpy,
+        fetch_dxy, fetch_fx_intraday,
     )
     from services.signal_engine import (
-        calc_tether_signal, calc_dollar_signal, calc_yen_signal,
+        calc_tether_signal, calc_dollar_signal, calc_fx_split_signal,
     )
 
+    cfg = get_settings()
     macro = fetch_macro()
     crypto = fetch_usdt_premium(macro.usd_krw)
     dxy = fetch_dxy()
-    bank_rates = fetch_bank_rates(macro.usd_krw)
-    jpy = fetch_jpy()
-    bank_rates_jpy = fetch_bank_rates_jpy(jpy.price) if jpy.price > 0 else []
+
+    usd_intraday = fetch_fx_intraday("KRW=X", "USD", 1.0)
+    jpy_intraday = fetch_fx_intraday("JPYKRW=X", "JPY", 1.0)
 
     tether_sig = calc_tether_signal(macro, crypto)
     dollar_sig = calc_dollar_signal(dxy, macro)
-    yen_sig = calc_yen_signal(jpy)
+    usd_split = calc_fx_split_signal(
+        usd_intraday, cfg.fx_split_buy_interval_usd,
+        cfg.fx_split_sell_interval_usd, dxy=dxy,
+    )
+    jpy_split = calc_fx_split_signal(
+        jpy_intraday, cfg.fx_split_buy_interval_jpy,
+        cfg.fx_split_sell_interval_jpy, dxy=dxy,
+    )
 
     return {
-        "macro": macro,
         "crypto": crypto,
         "dxy": dxy,
-        "bank_rates": bank_rates,
-        "bank_rates_jpy": bank_rates_jpy,
         "tether_sig": tether_sig,
         "dollar_sig": dollar_sig,
-        "yen_sig": yen_sig,
+        "usd_split": usd_split,
+        "jpy_split": jpy_split,
     }
 
 
-@st.cache_data(ttl=300, show_spinner="\uc885\ubaa9 \ubd84\uc11d \uc911\u2026")
+@st.cache_data(ttl=60, show_spinner=False)
 def _load_heavy():
-    """Slow path: stock screening + AI (lazy, only when needed)."""
+    """Read SLOW stock results from DB. Fallback to live if stale."""
+    cached = load_latest(SLOW_STOCKS, max_age_seconds=3600)
+    if cached:
+        return {
+            "wl_quotes": [_rebuild_dataclass(StockQuote, q) for q in cached["wl_quotes"]],
+            "magic_sigs": [_rebuild_dataclass(MagicSignal, s) for s in cached["magic_sigs"]],
+            "screened": [_rebuild_dataclass(ScreenedStock, s) for s in cached["screened"]],
+            "ai_top": [_rebuild_dataclass(AnalysisResult, r) for r in cached["ai_top"]],
+        }
+
+    # Fallback: live computation (slow)
     from services.data_fetcher import fetch_stocks_batch
-    from services.news_fetcher import fetch_news, NewsItem
-    from services.signal_engine import calc_magic_signals, calc_warehouse_signals
+    from services.news_fetcher import NewsItem, fetch_news
+    from services.signal_engine import calc_magic_signals
     from services.stock_analyst import analyze_screened_stocks
     from services.index_scanner import screen_index_stocks
 
     cfg = get_settings()
-    sig = _load_signals()
-    macro = sig["macro"]
-
     wl_quotes = fetch_stocks_batch(cfg.watchlist)
-    wh_symbols = list(cfg.warehouse_allocations.keys())
-    wh_quotes = fetch_stocks_batch(wh_symbols)
-
     magic_sigs = calc_magic_signals(wl_quotes)
-    wh_sigs = calc_warehouse_signals(wh_quotes, macro)
 
     screened = screen_index_stocks(top_n=cfg.index_screen_top_n_ai * 4)
-
-    top_candidates = screened[: cfg.index_screen_top_n_ai]
+    top_candidates = screened[:cfg.index_screen_top_n_ai]
     news_map: dict[str, list[NewsItem]] = {}
     for s in top_candidates:
         news_map[s.symbol] = fetch_news(f"{s.symbol} stock")
@@ -98,10 +138,37 @@ def _load_heavy():
     return {
         "wl_quotes": wl_quotes,
         "magic_sigs": magic_sigs,
-        "wh_quotes": wh_quotes,
-        "wh_sigs": wh_sigs,
         "screened": screened,
         "ai_top": ai_top,
+    }
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_warehouse():
+    """Read WAREHOUSE from DB. Fallback to live if stale."""
+    cached = load_latest(WAREHOUSE, max_age_seconds=600)
+    if cached:
+        return {
+            "wh_quotes": [_rebuild_dataclass(StockQuote, q) for q in cached["wh_quotes"]],
+            "wh_sigs": [_rebuild_dataclass(WarehouseSignal, s) for s in cached["wh_sigs"]],
+        }
+
+    # Fallback: live computation
+    from services.data_fetcher import fetch_stocks_batch, fetch_macro
+    from services.signal_engine import calc_warehouse_signals
+    from services.portfolio_store import load_portfolio
+
+    cfg = get_settings()
+    macro = fetch_macro()
+    portfolio = load_portfolio()
+
+    wh_symbols = list(cfg.warehouse_allocations.keys())
+    wh_quotes = fetch_stocks_batch(wh_symbols)
+    wh_sigs = calc_warehouse_signals(wh_quotes, macro, portfolio.total_investment)
+
+    return {
+        "wh_quotes": wh_quotes,
+        "wh_sigs": wh_sigs,
     }
 
 
@@ -119,9 +186,10 @@ with _hdr_l:
         unsafe_allow_html=True,
     )
 with _hdr_r:
-    if st.button("\U0001f504", help="\uc0c8\ub85c\uace0\uce68"):
+    if st.button("\U0001f504", help="새로고침"):
         _load_signals.clear()
         _load_heavy.clear()
+        _load_warehouse.clear()
         st.rerun()
 
 
@@ -131,39 +199,49 @@ sig = _load_signals()
 
 # ── Tabs ─────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "\U0001f6a6 \uc885\ud569 \uc2dc\uadf8\ub110",
-    "\U0001f4e1 \ub9e4\ud06c\ub85c & \ub2ec\ub7ec",
-    "\U0001f3af Magic Split",
-    "\U0001f3db\ufe0f Warehouse",
+tab1, tab2, tab3 = st.tabs([
+    "🚦 종합 시그널",
+    "🔍 주식 탐색",
+    "🏛️ Warehouse LAA",
 ])
 
 with tab1:
     from ui.section_signals import render_signals
+    # Pre-load warehouse + stock data for summary cards
+    try:
+        wh = _load_warehouse()
+        wh_sigs = wh["wh_sigs"]
+    except Exception:
+        wh_sigs = None
+
+    try:
+        heavy = _load_heavy()
+        ai_top = heavy["ai_top"]
+    except Exception:
+        ai_top = None
+
     render_signals(
         tether=sig["tether_sig"],
         crypto=sig["crypto"],
-        bank_rates=sig["bank_rates"],
         dxy=sig["dxy"],
         dollar=sig["dollar_sig"],
-        yen=sig["yen_sig"],
-        bank_rates_jpy=sig["bank_rates_jpy"],
+        usd_split=sig["usd_split"],
+        jpy_split=sig["jpy_split"],
+        wh_signals=wh_sigs,
+        ai_results=ai_top,
     )
 
 with tab2:
-    from ui.section_macro import render_macro
-    render_macro(
-        sig["macro"], sig["crypto"], sig["tether_sig"],
-        dxy=sig["dxy"],
-        bank_rates=sig["bank_rates"],
+    heavy = _load_heavy()
+    from ui.section_stock import render_stock_explorer
+    render_stock_explorer(
+        wl_quotes=heavy["wl_quotes"],
+        magic_signals=heavy["magic_sigs"],
+        ai_results=heavy["ai_top"],
+        screened=heavy["screened"],
     )
 
 with tab3:
-    heavy = _load_heavy()
-    from ui.section_magic import render_magic
-    render_magic(heavy["wl_quotes"], heavy["magic_sigs"], heavy["ai_top"])
-
-with tab4:
-    heavy = _load_heavy()
+    wh = _load_warehouse()
     from ui.section_warehouse import render_warehouse
-    render_warehouse(heavy["wh_quotes"], heavy["wh_sigs"])
+    render_warehouse(wh["wh_quotes"], wh["wh_sigs"])
