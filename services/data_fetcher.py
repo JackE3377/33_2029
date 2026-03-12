@@ -307,109 +307,78 @@ def fetch_jpy() -> JPYData:
     return d
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def _fetch_koexim_rates(cur_unit: str = "USD") -> Optional[tuple[float, float, float]]:
-    """Fetch official rates from 한국수출입은행 API.
-
-    Returns (매매기준율, TTS, TTB) or None if unavailable.
-    """
-    cfg = get_settings()
-    if not cfg.koexim_api_key:
-        return None
-    try:
-        url = "https://www.koexim.go.kr/site/program/financial/exchangeJSON"
-        today = datetime.now().strftime("%Y%m%d")
-        resp = requests.get(url, params={
-            "authkey": cfg.koexim_api_key,
-            "searchdate": today,
-            "data": "AP01",
-        }, timeout=5)
-        resp.raise_for_status()
-        data = resp.json()
-        for item in data:
-            if item.get("cur_unit") == cur_unit:
-                def _p(v: str) -> float:
-                    return float(v.replace(",", ""))
-                return (_p(item["deal_bas_r"]), _p(item["tts"]), _p(item["ttb"]))
-    except Exception:
-        pass
-    return None
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_bank_rates_jpy(base_jpy_krw: float) -> list['BankRate']:
-    """Compute bank JPY rates using 우대율 model (100엔 기준)."""
-    cfg = get_settings()
-    base_100 = base_jpy_krw * 100
-    base_spread = cfg.fx_base_spread_jpy
-
-    # Try KOEXIM for official JPY TTS/TTB
-    koexim = _fetch_koexim_rates("JPY(100)")
-    if koexim:
-        _, tts, ttb = koexim
-        tts_gap = tts - base_100
-        ttb_gap = base_100 - ttb
-    else:
-        tts_gap = base_100 * base_spread / 100
-        ttb_gap = base_100 * base_spread / 100
-
-    rates: list['BankRate'] = []
-    for name, pref in cfg.bank_preferences_jpy.items():
-        discount = pref / 100
-        buy = round(base_100 + tts_gap * (1 - discount), 2)
-        sell = round(base_100 - ttb_gap * (1 - discount), 2)
-        actual_spread = round((buy - sell) / base_100 * 100, 4) if base_100 > 0 else 0
-        rates.append(BankRate(
-            name=name, buy_rate=buy, sell_rate=sell, spread_pct=actual_spread,
-        ))
-    if rates:
-        best_buy = min(rates, key=lambda r: r.buy_rate)
-        best_sell = max(rates, key=lambda r: r.sell_rate)
-        best_buy.recommendation = "💰 매수 최저가"
-        best_sell.recommendation = "💵 매도 최고가"
-    return rates
-
-
 # ── Bank Exchange Rates ───────────────────────────────────────
 
 @dataclass
 class BankRate:
     name: str = ""
-    buy_rate: float = 0.0      # 달러 살 때 (고객이 원화→달러)
-    sell_rate: float = 0.0     # 달러 팔 때 (고객이 달러→원화)
+    buy_rate: float = 0.0      # 달러 살 때 (고객이 원화→달러) = TTS 우대 적용
+    sell_rate: float = 0.0     # 달러 팔 때 (고객이 달러→원화) = TTB 우대 적용
     spread_pct: float = 0.0
-    recommendation: str = ""   # "매수 유리" / "매도 유리" / ""
+    recommendation: str = ""
+
+
+@dataclass
+class _OfficialFXRate:
+    """하나은행 고시 환율 (다음 금융 API 경유)."""
+    base_price: float = 0.0    # 매매기준율
+    tts: float = 0.0           # 전신환 매도율 (고객이 살 때)
+    ttb: float = 0.0           # 전신환 매수율 (고객이 팔 때)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_bank_rates(base_usd_krw: float) -> list[BankRate]:
-    """Compute bank exchange rates using 우대율 model.
+def _fetch_official_fx() -> dict[str, _OfficialFXRate]:
+    """다음 금융 API에서 하나은행 고시 환율 조회 (USD, JPY).
 
-    Formula per institution:
-      buy  = 기준율 + (TTS - 기준율) × (1 - 우대율/100)
-      sell = 기준율 - (기준율 - TTB) × (1 - 우대율/100)
-    100% 우대 → buy = sell = 기준율 (토스, 카카오뱅크)
+    Returns dict keyed by currency code, e.g. {"USD": ..., "JPY": ...}.
     """
-    cfg = get_settings()
-    base_spread = cfg.fx_base_spread_usd
+    result: dict[str, _OfficialFXRate] = {}
+    try:
+        resp = requests.get(
+            "https://finance.daum.net/api/exchanges/summaries",
+            params={"fieldType": "exchange"},
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Referer": "https://finance.daum.net/exchanges",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        for item in resp.json().get("data", []):
+            code = item.get("currencyCode", "")
+            if code in ("USD", "JPY"):
+                unit = item.get("currencyUnit", 1)
+                result[code] = _OfficialFXRate(
+                    base_price=float(item.get("basePrice", 0)),
+                    tts=float(item.get("ttSellingPrice", 0)),
+                    ttb=float(item.get("ttBuyingPrice", 0)),
+                )
+    except Exception:
+        pass
+    return result
 
-    # Try KOEXIM for official TTS/TTB
-    koexim = _fetch_koexim_rates("USD")
-    if koexim:
-        _, tts, ttb = koexim
-        tts_gap = tts - base_usd_krw
-        ttb_gap = base_usd_krw - ttb
-    else:
-        # Fallback: estimate spread from base rate
-        tts_gap = base_usd_krw * base_spread / 100
-        ttb_gap = base_usd_krw * base_spread / 100
+
+def _build_bank_rates(
+    base_price: float,
+    tts: float,
+    ttb: float,
+    preferences: dict[str, float],
+    fallback_spread: float,
+) -> list[BankRate]:
+    """기준율 + TTS/TTB + 우대율로 각 기관 환율 계산.
+
+    buy  = 기준율 + (TTS - 기준율) × (1 - 우대율/100)
+    sell = 기준율 - (기준율 - TTB) × (1 - 우대율/100)
+    """
+    tts_gap = tts - base_price if tts > 0 else base_price * fallback_spread / 100
+    ttb_gap = base_price - ttb if ttb > 0 else base_price * fallback_spread / 100
 
     rates: list[BankRate] = []
-    for name, pref in cfg.bank_preferences.items():
+    for name, pref in preferences.items():
         discount = pref / 100
-        buy = round(base_usd_krw + tts_gap * (1 - discount), 2)
-        sell = round(base_usd_krw - ttb_gap * (1 - discount), 2)
-        actual_spread = round((buy - sell) / base_usd_krw * 100, 4) if base_usd_krw > 0 else 0
+        buy = round(base_price + tts_gap * (1 - discount), 2)
+        sell = round(base_price - ttb_gap * (1 - discount), 2)
+        actual_spread = round((buy - sell) / base_price * 100, 4) if base_price > 0 else 0
         rates.append(BankRate(
             name=name, buy_rate=buy, sell_rate=sell, spread_pct=actual_spread,
         ))
@@ -417,7 +386,41 @@ def fetch_bank_rates(base_usd_krw: float) -> list[BankRate]:
     if rates:
         best_buy = min(rates, key=lambda r: r.buy_rate)
         best_sell = max(rates, key=lambda r: r.sell_rate)
-        best_buy.recommendation = "💰 매수 최저가"
-        best_sell.recommendation = "💵 매도 최고가"
+        best_buy.recommendation = "\U0001f4b0 매수 최저가"
+        best_sell.recommendation = "\U0001f4b5 매도 최고가"
 
     return rates
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_bank_rates(base_usd_krw: float) -> list[BankRate]:
+    """은행별 USD 환율 — 하나은행 고시 TTS/TTB + 우대율 적용."""
+    cfg = get_settings()
+    official = _fetch_official_fx()
+    usd = official.get("USD")
+    if usd and usd.base_price > 0:
+        base = usd.base_price
+        tts = usd.tts
+        ttb = usd.ttb
+    else:
+        base = base_usd_krw
+        tts = 0.0
+        ttb = 0.0
+    return _build_bank_rates(base, tts, ttb, cfg.bank_preferences, cfg.fx_base_spread_usd)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_bank_rates_jpy(base_jpy_krw: float) -> list[BankRate]:
+    """은행별 JPY 환율 — 하나은행 고시 TTS/TTB + 우대율 적용 (100엔 기준)."""
+    cfg = get_settings()
+    official = _fetch_official_fx()
+    jpy = official.get("JPY")
+    if jpy and jpy.base_price > 0:
+        base = jpy.base_price      # already per 100 yen from Daum
+        tts = jpy.tts
+        ttb = jpy.ttb
+    else:
+        base = base_jpy_krw * 100
+        tts = 0.0
+        ttb = 0.0
+    return _build_bank_rates(base, tts, ttb, cfg.bank_preferences_jpy, cfg.fx_base_spread_jpy)
