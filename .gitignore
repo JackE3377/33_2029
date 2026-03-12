@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 data/
+logs/
 .streamlit/secrets.toml
 .venv/
 venv/
