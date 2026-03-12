@@ -1,154 +1,117 @@
 # ============================================================
-# GEM Protocol — UI Component Library (Apple HIG)
+# GEM Protocol v2 — Reusable UI Components
 # ============================================================
-"""
-Reusable Streamlit UI components with Apple-style rendering.
-All components use st.markdown with HTML/CSS injection.
-"""
 from __future__ import annotations
 
 import streamlit as st
 
 
-def _html(html_str: str):
-    """Render HTML via st.markdown, stripping leading whitespace to avoid code-block interpretation."""
-    st.markdown(html_str.strip(), unsafe_allow_html=True)
+def _html(s: str):
+    st.markdown(s.strip(), unsafe_allow_html=True)
 
 
-# ---------- Cards ----------
+# ── Cards & Metrics ───────────────────────────────────────────
 
-def metric_card(label: str, value: str, subtitle: str = "", css_class: str = ""):
-    """Apple-style metric card with glassmorphism."""
-    value_class = f"gem-card-value {css_class}".strip()
+def metric_card(label: str, value: str, sub: str = "", css: str = ""):
+    cls = f"gc-value {css}".strip()
     _html(
-        f'<div class="gem-card">'
-        f'<div class="gem-card-header">{label}</div>'
-        f'<div class="{value_class}">{value}</div>'
-        f'<div class="gem-card-subtitle">{subtitle}</div>'
+        f'<div class="gc">'
+        f'<div class="gc-label">{label}</div>'
+        f'<div class="{cls}">{value}</div>'
+        f'<div class="gc-sub">{sub}</div>'
+        f'</div>'
+    )
+
+
+def big_metric(label: str, value: str, sub: str = "", css: str = ""):
+    cls = f"gc-value big {css}".strip()
+    _html(
+        f'<div class="gc">'
+        f'<div class="gc-label">{label}</div>'
+        f'<div class="{cls}">{value}</div>'
+        f'<div class="gc-sub">{sub}</div>'
         f'</div>'
     )
 
 
 def metric_grid(metrics: list[dict]):
-    """Render a responsive grid of metrics."""
     items = ""
     for m in metrics:
-        direction = m.get("direction", "")
-        change_class = f"gem-metric-change {direction}" if direction else "gem-metric-change"
-        change_html = f'<div class="{change_class}">{m.get("change", "")}</div>' if m.get("change") else ""
+        v_cls = f"gc-value {m.get('css', '')}".strip()
         items += (
-            f'<div class="gem-metric-item">'
-            f'<div class="gem-metric-label">{m["label"]}</div>'
-            f'<div class="gem-metric-value">{m["value"]}</div>'
-            f'{change_html}'
+            f'<div class="gc">'
+            f'<div class="gc-label">{m["label"]}</div>'
+            f'<div class="{v_cls}">{m["value"]}</div>'
+            f'<div class="gc-sub">{m.get("sub", "")}</div>'
             f'</div>'
         )
-    _html(f'<div class="gem-metric-grid">{items}</div>')
+    _html(f'<div class="mg">{items}</div>')
 
 
-def ai_insight_card(title: str, content: str):
-    """Purple-tinted AI analysis card."""
-    content_html = content.replace("\n", "<br>") if content else "<em>AI 분석 준비 중...</em>"
-    _html(
-        f'<div class="gem-ai-card">'
-        f'<div class="gem-card-header">\U0001f916 {title}</div>'
-        f'<div style="font-size:14px;line-height:1.7;color:var(--apple-text-primary);">'
-        f'{content_html}</div>'
-        f'</div>'
-    )
+# ── Alerts ────────────────────────────────────────────────────
+
+def alert_critical(msg: str):
+    _html(f'<div class="al-crit"><span style="font-size:20px;">🚨</span><span>{msg}</span></div>')
 
 
-# ---------- Alerts ----------
-
-def alert_banner(priority: str, message: str, icon: str = ""):
-    """Top-of-page alert banner (critical/warning/info)."""
-    css_class = {
-        "critical": "gem-alert-critical",
-        "warning": "gem-alert-warning",
-        "info": "gem-alert-info",
-    }.get(priority, "gem-alert-info")
-    default_icons = {"critical": "\U0001f534", "warning": "\U0001f7e1", "info": "\U0001f535"}
-    icon = icon or default_icons.get(priority, "\u2139\ufe0f")
-    _html(
-        f'<div class="{css_class}">'
-        f'<span style="font-size:20px;">{icon}</span>'
-        f'<span>{message}</span>'
-        f'</div>'
-    )
+def alert_warning(msg: str):
+    _html(f'<div class="al-warn"><span style="font-size:20px;">⚠️</span><span>{msg}</span></div>')
 
 
-# ---------- Status Indicators ----------
-
-def engine_status_indicator(name: str, status: str, last_run: str = ""):
-    """Traffic light status dot for engine health."""
-    color = {"running": "green", "paused": "yellow", "error": "red", "idle": "yellow"}.get(status, "yellow")
-    status_label = {"running": "정상 운행", "paused": "일시 정지", "error": "오류 발생", "idle": "대기 중"}.get(status, status)
-    last_run_text = f' \u00b7 마지막: {last_run}' if last_run else ""
-    _html(
-        f'<div style="display:flex;align-items:center;padding:8px 0;">'
-        f'<span class="gem-status-dot {color}"></span>'
-        f'<span style="font-weight:500;font-size:14px;color:var(--apple-text-primary);">{name}</span>'
-        f'<span style="margin-left:8px;font-size:12px;color:var(--apple-text-tertiary);">'
-        f'{status_label}{last_run_text}</span>'
-        f'</div>'
-    )
+def alert_info(msg: str):
+    _html(f'<div class="al-info"><span style="font-size:20px;">ℹ️</span><span>{msg}</span></div>')
 
 
-# ---------- Section Headers ----------
+def alert_scout(msg: str):
+    _html(f'<div class="al-scout"><span style="font-size:20px;">🎯</span><span>{msg}</span></div>')
+
+
+# ── Section Headers ───────────────────────────────────────────
 
 def section_title(title: str, subtitle: str = ""):
-    """Apple-style section header with optional subtitle."""
-    _html(f'<div class="gem-section-title">{title}</div>')
+    _html(f'<div class="st">{title}</div>')
     if subtitle:
-        _html(f'<div class="gem-section-subtitle">{subtitle}</div>')
+        _html(f'<div class="st-sub">{subtitle}</div>')
 
 
-# ---------- Progress ----------
+# ── Traffic Light ─────────────────────────────────────────────
 
-def goal_progress(current: float, target: float, label: str = ""):
-    """Progress bar showing progress toward 33억 goal."""
-    pct = min((current / target) * 100, 100) if target > 0 else 0
-    label_text = label or f"\u20a9{current/1e8:,.1f}억 / \u20a9{target/1e8:,.1f}억 ({pct:.1f}%)"
+def traffic_light(label: str, status: str, detail: str = ""):
+    color = {"hot": "r", "cold": "g", "panic": "r", "normal": "g"}.get(status, "y")
     _html(
-        f'<div class="gem-card">'
-        f'<div class="gem-card-header">\U0001f3af 목표 달성률</div>'
-        f'<div style="font-size:14px;margin-bottom:8px;color:var(--apple-text-secondary);">{label_text}</div>'
-        f'<div class="gem-progress-container">'
-        f'<div class="gem-progress-bar" style="width:{pct}%;"></div>'
-        f'</div></div>'
+        f'<div style="display:flex;align-items:center;padding:6px 0;">'
+        f'<span class="dot {color}"></span>'
+        f'<span style="font-weight:600;font-size:14px;">{label}</span>'
+        f'<span style="margin-left:10px;font-size:12px;color:var(--text-3);">{detail}</span>'
+        f'</div>'
     )
 
 
-# ---------- Badges ----------
+# ── Table ────────────────────────────────────────────────────
 
-def badge(text: str, color: str = "blue") -> str:
-    """Returns HTML for an inline badge. Use inside markdown."""
-    return f'<span class="gem-badge {color}">{text}</span>'
-
-
-# ---------- Data Table ----------
-
-def styled_table(headers: list[str], rows: list[list[str]]):
-    """Apple-style data table."""
+def data_table(headers: list[str], rows: list[list[str]]):
     th = "".join(f"<th>{h}</th>" for h in headers)
-    tbody = ""
+    body = ""
     for row in rows:
-        cells = "".join(f"<td>{cell}</td>" for cell in row)
-        tbody += f"<tr>{cells}</tr>"
+        body += "<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>"
+    _html(f'<table class="gt"><thead><tr>{th}</tr></thead><tbody>{body}</tbody></table>')
+
+
+# ── Badge ────────────────────────────────────────────────────
+
+def verdict_badge(verdict: str) -> str:
+    css = {"BUY": "buy", "HOLD": "hold", "AVOID": "avoid"}.get(verdict, "hold")
+    return f'<span class="badge {css}">{verdict}</span>'
+
+
+# ── AI Analysis Card ─────────────────────────────────────────
+
+def analysis_card(title: str, body: str):
+    body_html = body.replace("\n", "<br>") if body else "<em>분석 대기 중...</em>"
     _html(
-        f'<table class="gem-table">'
-        f'<thead><tr>{th}</tr></thead>'
-        f'<tbody>{tbody}</tbody>'
-        f'</table>'
+        f'<div class="ac">'
+        f'<div class="ac-title">🤖 {title}</div>'
+        f'<div class="ac-body">{body_html}</div>'
+        f'</div>'
     )
 
-
-# ---------- Chart Container ----------
-
-def chart_container(title: str):
-    """Returns a context-like styled container wrapper for charts."""
-    _html(f'<div class="gem-card"><div class="gem-card-header">{title}</div>')
-
-
-def chart_container_end():
-    _html("</div>")
