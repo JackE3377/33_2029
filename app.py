@@ -196,18 +196,15 @@ tab1, tab2, tab3 = st.tabs([
 
 with tab1:
     from ui.section_signals import render_signals
-    # Pre-load warehouse + stock data for summary cards
-    try:
-        wh = _load_warehouse()
-        wh_sigs = wh["wh_sigs"]
-    except Exception:
-        wh_sigs = None
 
-    try:
-        heavy = _load_heavy()
-        ai_top = heavy["ai_top"]
-    except Exception:
-        ai_top = None
+    # Quick DB-only peek for summary cards (no fallback — avoids slow live fetch)
+    _wh_cache = load_latest(WAREHOUSE, max_age_seconds=86400)
+    _wh_sigs = ([_rebuild_dataclass(WarehouseSignal, s) for s in _wh_cache["wh_sigs"]]
+                if _wh_cache else None)
+
+    _sl_cache = load_latest(SLOW_STOCKS, max_age_seconds=86400)
+    _ai_top = ([_rebuild_dataclass(AnalysisResult, r) for r in _sl_cache.get("ai_top", [])]
+               if _sl_cache else None)
 
     render_signals(
         tether=sig["tether_sig"],
@@ -216,8 +213,8 @@ with tab1:
         dollar=sig["dollar_sig"],
         usd_split=sig["usd_split"],
         jpy_split=sig["jpy_split"],
-        wh_signals=wh_sigs,
-        ai_results=ai_top,
+        wh_signals=_wh_sigs,
+        ai_results=_ai_top,
     )
 
 with tab2:
