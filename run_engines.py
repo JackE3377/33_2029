@@ -7,8 +7,9 @@ No Streamlit dependency — fetches data, computes signals, saves to SQLite.
 
 Usage:
     pythonw.exe run_engines.py fast     ← every 5 min (FX, tether, DXY, warehouse)
-    pythonw.exe run_engines.py slow     ← every 30 min (stock screening + AI)
-    python.exe  run_engines.py all      ← run both (for manual testing)
+    pythonw.exe run_engines.py slow     ← every 30 min (stock screening only)
+    pythonw.exe run_engines.py ai       ← once per day (screening + Gemini AI)
+    python.exe  run_engines.py all      ← run all (for manual testing)
 """
 from __future__ import annotations
 
@@ -140,8 +141,39 @@ def run_fast() -> None:
 
 
 def run_slow() -> None:
-    """SLOW group: stock screening + AI — runs every 30 min."""
+    """SLOW group: stock screening (no AI) — runs every 30 min."""
     log.info("=== SLOW group start ===")
+
+    from services.data_fetcher import fetch_stocks_batch
+    from services.signal_engine import calc_magic_signals
+    from services.index_scanner import screen_index_stocks
+    from services.cache_store import load_latest
+
+    cfg = get_settings()
+
+    wl_quotes = fetch_stocks_batch(cfg.watchlist)
+    magic_sigs = calc_magic_signals(wl_quotes)
+    screened = screen_index_stocks(top_n=cfg.index_screen_top_n_ai * 4)
+
+    # Preserve previous AI results from last run_ai() execution
+    prev = load_latest(SLOW_STOCKS)
+    prev_ai = prev.get("ai_top", []) if prev else []
+
+    payload = {
+        "wl_quotes": [asdict(q) for q in wl_quotes],
+        "magic_sigs": [asdict(s) for s in magic_sigs],
+        "screened": [asdict(s) for s in screened],
+        "ai_top": prev_ai,
+    }
+    save_result(SLOW_STOCKS, payload)
+    cleanup_old(SLOW_STOCKS)
+    log.info("SLOW group saved — %d screened, AI preserved from last run", len(screened))
+    log.info("=== SLOW group done ===")
+
+
+def run_ai() -> None:
+    """AI group: screening + Gemini analysis — runs once per day."""
+    log.info("=== AI group start ===")
 
     from services.data_fetcher import fetch_stocks_batch
     from services.news_fetcher import fetch_news
@@ -174,8 +206,8 @@ def run_slow() -> None:
     }
     save_result(SLOW_STOCKS, payload)
     cleanup_old(SLOW_STOCKS)
-    log.info("SLOW group saved — %d screened, %d AI results", len(screened), len(ai_top))
-    log.info("=== SLOW group done ===")
+    log.info("AI group saved — %d screened, %d AI results", len(screened), len(ai_top))
+    log.info("=== AI group done ===")
 
 
 def main():
@@ -189,6 +221,8 @@ def main():
         run_fast()
     if mode in ("slow", "all"):
         run_slow()
+    if mode in ("ai", "all"):
+        run_ai()
 
     elapsed = (datetime.now(timezone.utc) - start).total_seconds()
     log.info("run_engines finished — %.1fs elapsed", elapsed)

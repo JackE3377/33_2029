@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3-flash-preview"
     gemini_model_lite: str = "gemini-3-flash-preview"
+    # Fallback models (separate daily quota pool)
+    gemini_model_fallback: str = "gemini-3.1-flash-lite-preview"
+    gemini_model_lite_fallback: str = "gemini-3.1-flash-lite-preview"
 
     # -- Data APIs --
     fred_api_key: str = ""

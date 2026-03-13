@@ -12,7 +12,9 @@ Falls back to a purely rule-based score when Gemini is unavailable.
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 import streamlit as st
@@ -20,6 +22,8 @@ import streamlit as st
 from core.config import get_settings
 from services.data_fetcher import StockQuote
 from services.news_fetcher import NewsItem
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -36,19 +40,116 @@ class AnalysisResult:
 
 # ── Gemini helper ─────────────────────────────────────────────
 
+# Module-level client & throttle
+_gemini_client = None
+_last_call_ts: float = 0.0
+_MIN_CALL_INTERVAL = 4.0  # seconds between API calls
+_exhausted_models: set[str] = set()  # models whose daily quota is gone
+
+
+def _get_gemini_client():
+    global _gemini_client
+    if _gemini_client is None:
+        from google import genai
+        from google.genai.types import HttpOptions, HttpRetryOptions
+        cfg = get_settings()
+        # Disable SDK auto-retry on 429 — we handle it ourselves
+        _gemini_client = genai.Client(
+            api_key=cfg.gemini_api_key,
+            http_options=HttpOptions(
+                retry_options=HttpRetryOptions(attempts=1),
+            ),
+        )
+    return _gemini_client
+
+
+def _parse_retry_delay(err_str: str) -> float:
+    """Extract 'Please retry in Xs' from a 429 error."""
+    m = re.search(r"please retry in ([\d.]+)s", err_str, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+    m = re.search(r'"retryDelay":\s*"(\d+)s"', err_str)
+    if m:
+        return float(m.group(1))
+    return 60.0  # conservative fallback
+
+
+def _is_daily_quota(err_str: str) -> bool:
+    """True if the 429 is a daily (RPD) limit, not a per-minute (RPM) limit."""
+    return "PerDay" in err_str or "per_day" in err_str.lower()
+
+
 def _call_gemini(prompt: str, use_lite: bool = False) -> str | None:
-    """Call Gemini via google.genai SDK. Returns None on any failure."""
+    """Call Gemini with auto-fallback on daily quota exhaustion.
+
+    Free tier: 20 RPD per model. When primary model is exhausted,
+    switches to fallback model (separate quota pool).
+    Tier 1+: 1500 RPD — fallback rarely needed.
+    """
+    global _last_call_ts
     cfg = get_settings()
     if not cfg.gemini_api_key:
+        logger.warning("Gemini API key not configured")
         return None
     try:
-        from google import genai
-        client = genai.Client(api_key=cfg.gemini_api_key)
-        model_name = cfg.gemini_model_lite if use_lite else cfg.gemini_model
-        resp = client.models.generate_content(model=model_name, contents=prompt)
-        return resp.text
-    except Exception:
+        from google import genai  # noqa: F811
+    except ImportError:
+        logger.error("google-genai package not installed")
         return None
+
+    client = _get_gemini_client()
+
+    # Build model chain: primary → fallback
+    if use_lite:
+        chain = [cfg.gemini_model_lite, cfg.gemini_model_lite_fallback]
+    else:
+        chain = [cfg.gemini_model, cfg.gemini_model_fallback]
+    # Remove already-exhausted models, keep order
+    chain = [m for m in chain if m not in _exhausted_models]
+    if not chain:
+        logger.error("All Gemini models exhausted for today")
+        return None
+
+    for model_name in chain:
+        for attempt in range(3):
+            elapsed = time.time() - _last_call_ts
+            if elapsed < _MIN_CALL_INTERVAL:
+                time.sleep(_MIN_CALL_INTERVAL - elapsed)
+            try:
+                resp = client.models.generate_content(
+                    model=model_name, contents=prompt,
+                )
+                _last_call_ts = time.time()
+                return resp.text
+            except Exception as e:
+                _last_call_ts = time.time()
+                err_str = str(e)
+                if "429" not in err_str and "RESOURCE_EXHAUSTED" not in err_str:
+                    logger.error("Gemini API error: %s", e)
+                    return None
+                # Daily quota hit → mark model exhausted, try next
+                if _is_daily_quota(err_str):
+                    _exhausted_models.add(model_name)
+                    logger.warning(
+                        "%s daily quota exhausted, trying next model",
+                        model_name,
+                    )
+                    break  # break attempt loop, try next model
+                # RPM limit → wait and retry
+                wait = _parse_retry_delay(err_str) + 2
+                logger.warning(
+                    "Gemini RPM limit on %s (attempt %d/3), waiting %.0fs",
+                    model_name, attempt + 1, wait,
+                )
+                time.sleep(wait)
+                _last_call_ts = time.time()
+        else:
+            # All 3 retry attempts failed (RPM)
+            logger.error("%s failed after 3 RPM retries", model_name)
+            continue
+
+    logger.error("All models failed or exhausted")
+    return None
 
 
 # ── Rule-based fallback scoring ───────────────────────────────
