@@ -105,41 +105,30 @@ def _load_signals():
 @st.cache_data(ttl=60, show_spinner=False)
 def _load_heavy():
     """Read SLOW stock results from DB. Fallback to live if stale."""
-    cached = load_latest(SLOW_STOCKS, max_age_seconds=3600)
+    cached = load_latest(SLOW_STOCKS, max_age_seconds=86400)  # 24h — AI runs once/day
     if cached:
         return {
             "wl_quotes": [_rebuild_dataclass(StockQuote, q) for q in cached["wl_quotes"]],
             "magic_sigs": [_rebuild_dataclass(MagicSignal, s) for s in cached["magic_sigs"]],
             "screened": [_rebuild_dataclass(ScreenedStock, s) for s in cached["screened"]],
-            "ai_top": [_rebuild_dataclass(AnalysisResult, r) for r in cached["ai_top"]],
+            "ai_top": [_rebuild_dataclass(AnalysisResult, r) for r in cached.get("ai_top", [])],
         }
 
-    # Fallback: live computation (slow)
+    # Fallback: live screening only (no AI — AI runs via run_engines.py ai)
     from services.data_fetcher import fetch_stocks_batch
-    from services.news_fetcher import NewsItem, fetch_news
     from services.signal_engine import calc_magic_signals
-    from services.stock_analyst import analyze_screened_stocks
     from services.index_scanner import screen_index_stocks
 
     cfg = get_settings()
     wl_quotes = fetch_stocks_batch(cfg.watchlist)
     magic_sigs = calc_magic_signals(wl_quotes)
-
     screened = screen_index_stocks(top_n=cfg.index_screen_top_n_ai * 4)
-    top_candidates = screened[:cfg.index_screen_top_n_ai]
-    news_map: dict[str, list[NewsItem]] = {}
-    for s in top_candidates:
-        news_map[s.symbol] = fetch_news(f"{s.symbol} stock")
-
-    ai_top = analyze_screened_stocks(
-        screened, news_map, top_n=cfg.index_screen_top_n_ai,
-    )
 
     return {
         "wl_quotes": wl_quotes,
         "magic_sigs": magic_sigs,
         "screened": screened,
-        "ai_top": ai_top,
+        "ai_top": [],
     }
 
 
