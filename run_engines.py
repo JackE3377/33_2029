@@ -178,7 +178,7 @@ def run_ai() -> None:
     from services.data_fetcher import fetch_stocks_batch
     from services.news_fetcher import fetch_news
     from services.signal_engine import calc_magic_signals
-    from services.stock_analyst import analyze_screened_stocks
+    from services.stock_analyst import analyze_screened_stocks_batch
     from services.index_scanner import screen_index_stocks
 
     cfg = get_settings()
@@ -193,7 +193,7 @@ def run_ai() -> None:
     for s in top_candidates:
         news_map[s.symbol] = fetch_news(f"{s.symbol} stock")
 
-    ai_top = analyze_screened_stocks(
+    ai_top = analyze_screened_stocks_batch(
         screened, news_map, top_n=cfg.index_screen_top_n_ai,
     )
 

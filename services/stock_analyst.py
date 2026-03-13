@@ -326,3 +326,166 @@ def analyze_screened_stocks(
         results.append(AnalysisResult(**raw))
     results.sort(key=lambda r: r.score, reverse=True)
     return results
+
+
+# ── Batch analysis (3 Gemini calls total) ─────────────────────
+
+def _build_batch_context(candidates: list, news_map: dict[str, list[NewsItem]]) -> str:
+    """Build a single context block containing all candidates."""
+    blocks = []
+    for s in candidates:
+        news = news_map.get(s.symbol, [])
+        lines = [
+            f"### {s.symbol} ({s.name})",
+            f"Price: ${s.price:.2f}  Change: {s.change_pct:+.2f}%",
+            f"RSI(14): {s.rsi_14}  Weekly RSI: {s.weekly_rsi}",
+            f"Forward PE: {s.forward_pe}  PEG: {s.peg_ratio}",
+            f"FCF: {s.free_cash_flow}  D/E: {s.debt_to_equity}",
+            "Headlines:",
+        ]
+        for n in news[:4]:
+            lines.append(f"- {n.title}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _parse_json_array(text: str) -> list[dict] | None:
+    """Extract a JSON array from LLM response text."""
+    if not text:
+        return None
+    match = re.search(r'\[.*\]', text, re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group())
+    except json.JSONDecodeError:
+        return None
+
+
+def analyze_screened_stocks_batch(
+    screened: list,
+    news_map: dict[str, list[NewsItem]],
+    top_n: int = 5,
+) -> list[AnalysisResult]:
+    """Batch AI analysis — all candidates in 3 Gemini calls (Bull, Bear, Synthesis)."""
+    candidates = [s for s in screened[:top_n] if s.price > 0]
+    if not candidates:
+        return []
+
+    symbols = [s.symbol for s in candidates]
+    ctx = _build_batch_context(candidates, news_map)
+    symbol_list = ", ".join(symbols)
+
+    logger.info("Batch AI: %d candidates (%s)", len(candidates), symbol_list)
+
+    # ── Call 1: Bull Agent (lite model) ──
+    bull_prompt = (
+        f"You are a bullish equity analyst. For EACH of the following {len(candidates)} stocks, "
+        f"list 3-5 key growth catalysts, competitive advantages, and positive signals "
+        f"in 3-4 sentences. Be specific and cite data. Answer in Korean.\n\n"
+        f"Respond ONLY as a JSON array (no markdown, no extra text):\n"
+        f'[{{"symbol": "<TICKER>", "analysis": "<your bull analysis>"}}, ...]\n\n'
+        f"{ctx}"
+    )
+    bull_raw = _call_gemini(bull_prompt, use_lite=True)
+    bull_map: dict[str, str] = {}
+    bull_items = _parse_json_array(bull_raw)
+    if bull_items:
+        for item in bull_items:
+            sym = item.get("symbol", "").upper()
+            if sym in symbols:
+                bull_map[sym] = item.get("analysis", "")
+    logger.info("Bull batch: %d/%d parsed", len(bull_map), len(candidates))
+
+    # ── Call 2: Bear Agent (lite model) ──
+    bear_prompt = (
+        f"You are a bearish red-team analyst. For EACH of the following {len(candidates)} stocks, "
+        f"list 3-5 key risks, weaknesses, regulatory threats, and negative signals "
+        f"in 3-4 sentences. Be specific and cite data. Answer in Korean.\n\n"
+        f"Respond ONLY as a JSON array (no markdown, no extra text):\n"
+        f'[{{"symbol": "<TICKER>", "analysis": "<your bear analysis>"}}, ...]\n\n'
+        f"{ctx}"
+    )
+    bear_raw = _call_gemini(bear_prompt, use_lite=True)
+    bear_map: dict[str, str] = {}
+    bear_items = _parse_json_array(bear_raw)
+    if bear_items:
+        for item in bear_items:
+            sym = item.get("symbol", "").upper()
+            if sym in symbols:
+                bear_map[sym] = item.get("analysis", "")
+    logger.info("Bear batch: %d/%d parsed", len(bear_map), len(candidates))
+
+    # ── Call 3: Synthesis Agent (full model) ──
+    # Build synthesis input from bull/bear results
+    synth_blocks = []
+    for sym in symbols:
+        bull_text = bull_map.get(sym, "분석 없음")
+        bear_text = bear_map.get(sym, "분석 없음")
+        synth_blocks.append(
+            f"### {sym}\n"
+            f"**Bull:** {bull_text}\n"
+            f"**Bear:** {bear_text}"
+        )
+    synth_input = "\n\n".join(synth_blocks)
+
+    synth_prompt = (
+        f"You are a senior portfolio manager. Based on the Bull and Bear analyses below "
+        f"for {len(candidates)} stocks, give a final investment verdict for EACH stock.\n\n"
+        f"{synth_input}\n\n"
+        f"Respond ONLY as a JSON array (no markdown, no extra text):\n"
+        f'[{{"symbol": "<TICKER>", "score": <0-100>, "verdict": "<BUY|HOLD|AVOID>", '
+        f'"summary": "<2~3 sentence Korean summary>"}}, ...]'
+    )
+    synth_raw = _call_gemini(synth_prompt, use_lite=False)
+    synth_map: dict[str, dict] = {}
+    synth_items = _parse_json_array(synth_raw)
+    if synth_items:
+        for item in synth_items:
+            sym = item.get("symbol", "").upper()
+            if sym in symbols:
+                synth_map[sym] = item
+    logger.info("Synthesis batch: %d/%d parsed", len(synth_map), len(candidates))
+
+    # ── Assemble results ──
+    results: list[AnalysisResult] = []
+    for s in candidates:
+        sym = s.symbol
+        synth = synth_map.get(sym)
+        bull_text = bull_map.get(sym, "")
+        bear_text = bear_map.get(sym, "")
+
+        if synth and bull_text and bear_text:
+            results.append(AnalysisResult(
+                symbol=sym,
+                name=s.name,
+                score=int(synth.get("score", 50)),
+                verdict=synth.get("verdict", "HOLD"),
+                bull_summary=bull_text,
+                bear_summary=bear_text,
+                synthesis=synth.get("summary", ""),
+                source="ai",
+            ))
+        else:
+            # Fallback: rule-based for this stock
+            q = StockQuote(
+                symbol=sym, name=s.name, price=s.price,
+                change_pct=s.change_pct,
+                rsi_14=s.rsi_14, weekly_rsi=s.weekly_rsi,
+                forward_pe=s.forward_pe, peg_ratio=s.peg_ratio,
+                free_cash_flow=s.free_cash_flow,
+                debt_to_equity=s.debt_to_equity,
+            )
+            score = _rule_score(q)
+            results.append(AnalysisResult(
+                symbol=sym, name=s.name,
+                score=score,
+                verdict=_rule_verdict(score),
+                bull_summary=bull_text or "AI 분석 불가 — 재무지표 기반 평가",
+                bear_summary=bear_text or "AI 분석 불가 — 재무지표 기반 평가",
+                synthesis=f"규칙 기반 점수: {score}/100",
+                source="rule",
+            ))
+
+    results.sort(key=lambda r: r.score, reverse=True)
+    return results
