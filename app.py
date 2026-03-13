@@ -53,7 +53,7 @@ def _rebuild_dataclass(cls, d: dict):
 @st.cache_data(ttl=60, show_spinner=False)
 def _load_signals():
     """Read FAST signals from DB. Fallback to live fetch if stale."""
-    cached = load_latest(FAST_SIGNALS, max_age_seconds=600)
+    cached = load_latest(FAST_SIGNALS, max_age_seconds=3600)  # 1h
     if cached:
         return {
             "crypto": _rebuild_dataclass(CryptoQuote, cached["crypto"]),
@@ -135,7 +135,7 @@ def _load_heavy():
 @st.cache_data(ttl=60, show_spinner=False)
 def _load_warehouse():
     """Read WAREHOUSE from DB. Fallback to live if stale."""
-    cached = load_latest(WAREHOUSE, max_age_seconds=600)
+    cached = load_latest(WAREHOUSE, max_age_seconds=3600)  # 1h
     if cached:
         return {
             "wh_quotes": [_rebuild_dataclass(StockQuote, q) for q in cached["wh_quotes"]],
