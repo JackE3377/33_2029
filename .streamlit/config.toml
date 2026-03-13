@@ -9,5 +9,9 @@ font = "sans serif"
 enableXsrfProtection = true
 enableCORS = false
 
+[client]
+showSidebarNavigation = false
+toolbarMode = "minimal"
+
 [browser]
 gatherUsageStats = false

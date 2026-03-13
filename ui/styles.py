@@ -31,7 +31,21 @@ DARK_CSS = """
                  'Segoe UI', Roboto, sans-serif !important;
     color: var(--text-1) !important;
 }
-#MainMenu, footer, header { visibility: hidden; }
+/* Hide ALL Streamlit branding / chrome */
+#MainMenu { visibility: hidden !important; }
+footer { visibility: hidden !important; }
+header { visibility: hidden !important; }
+[data-testid="stToolbar"] { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
+[data-testid="stStatusWidget"] { display: none !important; }
+.stDeployButton { display: none !important; }
+.styles_viewerBadge__CvC9N { display: none !important; }  /* Made with Streamlit */
+.viewerBadge_container__r5tak { display: none !important; }
+.viewerBadge_link__qRIco { display: none !important; }
+a[href="https://streamlit.io"] { display: none !important; }
+[data-testid="manage-app-button"] { display: none !important; }
+[data-testid="stHeader"] { display: none !important; }
+.stActionButton { display: none !important; }
 .block-container { padding: 1.5rem 2rem !important; max-width: 1440px !important; }
 
 /* ─── Glass Card ─── */
