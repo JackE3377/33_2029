@@ -156,7 +156,7 @@ def run_slow() -> None:
     screened = screen_index_stocks(top_n=cfg.index_screen_top_n_ai * 4)
 
     # Preserve previous AI results from last run_ai() execution
-    prev = load_latest(SLOW_STOCKS)
+    prev = load_latest(SLOW_STOCKS, max_age_seconds=86400)
     prev_ai = prev.get("ai_top", []) if prev else []
 
     payload = {
@@ -167,7 +167,7 @@ def run_slow() -> None:
     }
     save_result(SLOW_STOCKS, payload)
     cleanup_old(SLOW_STOCKS)
-    log.info("SLOW group saved — %d screened, AI preserved from last run", len(screened))
+    log.info("SLOW group saved — %d screened, %d AI preserved", len(screened), len(prev_ai))
     log.info("=== SLOW group done ===")
 
 
