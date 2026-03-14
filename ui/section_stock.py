@@ -11,7 +11,7 @@ from services.stock_analyst import AnalysisResult
 from services.index_scanner import ScreenedStock
 from ui.components import (
     section_title, data_table, alert_scout, alert_info,
-    verdict_badge, analysis_card,
+    verdict_badge, analysis_card_v2,
 )
 
 
@@ -48,18 +48,13 @@ def render_stock_explorer(
                 f'<span class="badge" style="background:{score_color};'
                 f'color:#000;font-weight:700;">{r.score}점</span> {badge}'
             )
-
-            body_parts = []
-            if r.bull_summary:
-                body_parts.append(f"<b>🟢 Bull:</b> {r.bull_summary[:400]}")
-            if r.bear_summary:
-                body_parts.append(f"<b>🔴 Bear:</b> {r.bear_summary[:400]}")
-            if r.synthesis:
-                body_parts.append(f"<b>⚖️ 종합:</b> {r.synthesis}")
-            if r.source == "rule":
-                body_parts.append("<i>📊 규칙 기반 분석 (AI 비활성)</i>")
-
-            analysis_card(header, "\n".join(body_parts))
+            analysis_card_v2(
+                header,
+                bull=r.bull_summary[:400] if r.bull_summary else "",
+                bear=r.bear_summary[:400] if r.bear_summary else "",
+                synthesis=r.synthesis or "",
+                source=r.source or "ai",
+            )
 
         st.markdown("---")
 

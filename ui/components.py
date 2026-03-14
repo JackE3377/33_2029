@@ -116,6 +116,120 @@ def analysis_card(title: str, body: str):
     )
 
 
+def _fmt_body(text: str) -> str:
+    """Format AI analysis text: detect bullets/numbered lists, highlight keywords."""
+    import re as _re
+
+    def _highlight(t: str) -> str:
+        # Numbers: $123, 12.5%, RSI 28, PEG 0.8, PE 15
+        t = _re.sub(
+            r'(\$[\d,.]+|[\d]+\.?\d*%|RSI\s*[\d.]+|PEG\s*[\d.]+|'
+            r'P/?E\s*[\d.]+|EPS\s*[\d.]+|FCF\s*[\d,.]+|D/E\s*[\d.]+)',
+            r'<span class="ac2-num">\1</span>', t, flags=_re.IGNORECASE,
+        )
+        # Positive keywords
+        t = _re.sub(
+            r'(과매도|저평가|상승세|성장|강세|반등|호재|개선|확대|돌파|매출 증가|순이익 증가)',
+            r'<span class="ac2-pos">\1</span>', t,
+        )
+        # Negative keywords
+        t = _re.sub(
+            r'(과매수|고평가|하락|리스크|약세|위험|둔화|감소|적자|부채|하방|악재|축소)',
+            r'<span class="ac2-neg">\1</span>', t,
+        )
+        return t
+
+    lines = text.strip().split('\n')
+    # Detect numbered/bullet list: "1. ...", "1) ...", "- ...", "• ..."
+    bullet_re = _re.compile(r'^\s*(?:\d+[.)\-]|[-•▪▸])\s*')
+    bullet_lines = [l for l in lines if bullet_re.match(l)]
+    is_list = len(bullet_lines) >= 2
+
+    if is_list:
+        items = []
+        for line in lines:
+            stripped = bullet_re.sub('', line).strip()
+            if stripped:
+                items.append(f'<li>{_highlight(stripped)}</li>')
+        return '<ul class="ac2-list">' + ''.join(items) + '</ul>'
+    else:
+        # Legacy prose: split on sentence endings
+        parts = _re.split(r'(?<=[.!?。])\s+', text.strip())
+        if len(parts) <= 1:
+            return _highlight(text)
+        return ''.join(
+            f'<p class="ac2-sent">{_highlight(p.strip())}</p>'
+            for p in parts if p.strip()
+        )
+
+
+def analysis_card_v2(
+    header: str,
+    bull: str = "",
+    bear: str = "",
+    synthesis: str = "",
+    source: str = "ai",
+):
+    """Structured AI analysis card with color-coded Bull / Bear / Synthesis sections."""
+    sections = ""
+    if bull:
+        sections += (
+            '<div class="ac2-sec ac2-bull">'
+            '<div class="ac2-sec-title">🟢 Bull Agent</div>'
+            f'<div class="ac2-sec-body">{_fmt_body(bull)}</div>'
+            '</div>'
+        )
+    if bear:
+        sections += (
+            '<div class="ac2-sec ac2-bear">'
+            '<div class="ac2-sec-title">🔴 Bear Agent</div>'
+            f'<div class="ac2-sec-body">{_fmt_body(bear)}</div>'
+            '</div>'
+        )
+    if synthesis:
+        sections += (
+            '<div class="ac2-sec ac2-synth">'
+            '<div class="ac2-sec-title">⚖️ 종합 판단</div>'
+            f'<div class="ac2-sec-body">{_fmt_body(synthesis)}</div>'
+            '</div>'
+        )
+    footer = ""
+    if source == "rule":
+        footer = '<div class="ac2-footer">📊 규칙 기반 분석 (AI 비활성)</div>'
+
+    _html(
+        f'<div class="ac2">'
+        f'<div class="ac2-header">🤖 {header}</div>'
+        f'<div class="ac2-sections">{sections}</div>'
+        f'{footer}'
+        f'</div>'
+    )
+
+
+# ── Entry Gauge ──────────────────────────────────────────────
+
+def entry_gauge_html(icon: str, label: str, score: int, rationale: str = "") -> str:
+    """Return HTML for entry score gauge bar."""
+    score = max(0, min(100, score))
+    if score >= 60:
+        level = "eg-high"
+    elif score >= 30:
+        level = "eg-mid"
+    else:
+        level = "eg-low"
+    rat_html = f'<div class="eg-rationale">{rationale}</div>' if rationale else ""
+    return (
+        f'<div class="eg-wrap">'
+        f'<div class="eg-header">'
+        f'<span class="eg-label">{icon} {label} 진입점수</span>'
+        f'<span class="eg-score {level}">{score}<small>/100</small></span>'
+        f'</div>'
+        f'<div class="eg-track"><div class="eg-fill {level}" style="width:{score}%"></div></div>'
+        f'{rat_html}'
+        f'</div>'
+    )
+
+
 # ── Signal Card (OFF / ON / URGENT) ──────────────────────────
 
 def signal_card(

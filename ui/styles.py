@@ -166,5 +166,176 @@ a[href="https://streamlit.io"] { display: none !important; }
 
 /* ─── Hide sidebar completely ─── */
 section[data-testid="stSidebar"] { display: none !important; }
+
+/* ─── Entry Gauge Bar ─── */
+.eg-wrap {
+    background: var(--card-bg);
+    backdrop-filter: blur(var(--blur));
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-sm);
+    padding: 14px 18px;
+    margin-bottom: 8px;
+}
+.eg-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+.eg-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-2);
+}
+.eg-score {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+.eg-score.eg-low  { color: var(--red); }
+.eg-score.eg-mid  { color: var(--orange); }
+.eg-score.eg-high { color: var(--green); }
+.eg-track {
+    width: 100%;
+    height: 8px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+.eg-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.6s ease;
+}
+.eg-fill.eg-low  { background: linear-gradient(90deg, #ff453a, #ff6961); }
+.eg-fill.eg-mid  { background: linear-gradient(90deg, #ff9f0a, #ffb340); }
+.eg-fill.eg-high { background: linear-gradient(90deg, #30d158, #63e68b); }
+.eg-rationale {
+    font-size: 11px;
+    color: var(--text-3);
+    line-height: 1.4;
+}
+.eg-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+}
+@media (max-width: 768px) {
+    .eg-grid { grid-template-columns: 1fr; }
+}
+
+/* ─── AI Analysis Card v2 ─── */
+.ac2 {
+    background: rgba(28, 28, 30, 0.6);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 14px;
+}
+.ac2-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--card-border);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-1);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.ac2-sections {
+    display: flex;
+    flex-direction: column;
+}
+.ac2-sec {
+    padding: 12px 18px;
+    border-left: 4px solid transparent;
+}
+.ac2-sec + .ac2-sec {
+    border-top: 1px solid rgba(255,255,255,0.04);
+}
+.ac2-bull {
+    border-left-color: var(--green);
+    background: rgba(48,209,88,0.04);
+}
+.ac2-bear {
+    border-left-color: var(--red);
+    background: rgba(255,69,58,0.04);
+}
+.ac2-synth {
+    border-left-color: var(--purple);
+    background: rgba(191,90,242,0.06);
+}
+.ac2-sec-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+}
+.ac2-bull .ac2-sec-title { color: var(--green); }
+.ac2-bear .ac2-sec-title { color: var(--red); }
+.ac2-synth .ac2-sec-title { color: var(--purple); }
+.ac2-sec-body {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-2);
+}
+/* Bullet list inside analysis card */
+.ac2-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.ac2-list li {
+    position: relative;
+    padding: 5px 0 5px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.ac2-list li:last-child { border-bottom: none; }
+.ac2-list li::before {
+    content: '▸';
+    position: absolute;
+    left: 0;
+    color: var(--text-3);
+    font-size: 11px;
+}
+.ac2-bull .ac2-list li::before { color: var(--green); }
+.ac2-bear .ac2-list li::before { color: var(--red); }
+.ac2-synth .ac2-list li::before { color: var(--purple); }
+/* Sentence blocks (legacy prose fallback) */
+.ac2-sent {
+    margin: 0 0 6px 0;
+    padding-left: 10px;
+    border-left: 2px solid rgba(255,255,255,0.06);
+}
+.ac2-sent:last-child { margin-bottom: 0; }
+/* Keyword highlights */
+.ac2-num {
+    display: inline;
+    background: rgba(100,210,255,0.12);
+    color: var(--teal);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.ac2-pos {
+    color: var(--green);
+    font-weight: 600;
+}
+.ac2-neg {
+    color: var(--red);
+    font-weight: 600;
+}
+.ac2-footer {
+    padding: 8px 18px;
+    border-top: 1px solid var(--card-border);
+    font-size: 11px;
+    color: var(--text-3);
+}
 </style>
 """

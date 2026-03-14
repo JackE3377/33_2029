@@ -235,13 +235,15 @@ def analyze_stock(
     # Try AI pipeline — use lite model for bull/bear, full model for synthesis
     bull_text = _call_gemini(
         f"You are a bullish equity analyst. Analyse this stock and list 3-5 key "
-        f"growth catalysts, competitive advantages, and positive signals in 4-5 sentences. "
+        f"growth catalysts, competitive advantages, and positive signals "
+        f"as numbered bullet points (one point per line, 1-2 sentences each). "
         f"Be specific and cite data. Answer in Korean.\n\n{ctx}",
         use_lite=True,
     )
     bear_text = _call_gemini(
         f"You are a bearish red-team analyst. Analyse this stock and list 3-5 key "
-        f"risks, weaknesses, regulatory threats, and negative signals in 4-5 sentences. "
+        f"risks, weaknesses, regulatory threats, and negative signals "
+        f"as numbered bullet points (one point per line, 1-2 sentences each). "
         f"Be specific and cite data. Answer in Korean.\n\n{ctx}",
         use_lite=True,
     )
@@ -382,7 +384,8 @@ def analyze_screened_stocks_batch(
     bull_prompt = (
         f"You are a bullish equity analyst. For EACH of the following {len(candidates)} stocks, "
         f"list 3-5 key growth catalysts, competitive advantages, and positive signals "
-        f"in 3-4 sentences. Be specific and cite data. Answer in Korean.\n\n"
+        f"as numbered bullet points (one point per line, 1-2 sentences each). "
+        f"Be specific and cite data. Answer in Korean.\n\n"
         f"Respond ONLY as a JSON array (no markdown, no extra text):\n"
         f'[{{"symbol": "<TICKER>", "analysis": "<your bull analysis>"}}, ...]\n\n'
         f"{ctx}"
@@ -401,7 +404,8 @@ def analyze_screened_stocks_batch(
     bear_prompt = (
         f"You are a bearish red-team analyst. For EACH of the following {len(candidates)} stocks, "
         f"list 3-5 key risks, weaknesses, regulatory threats, and negative signals "
-        f"in 3-4 sentences. Be specific and cite data. Answer in Korean.\n\n"
+        f"as numbered bullet points (one point per line, 1-2 sentences each). "
+        f"Be specific and cite data. Answer in Korean.\n\n"
         f"Respond ONLY as a JSON array (no markdown, no extra text):\n"
         f'[{{"symbol": "<TICKER>", "analysis": "<your bear analysis>"}}, ...]\n\n'
         f"{ctx}"

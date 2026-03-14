@@ -10,7 +10,10 @@ from services.signal_engine import (
 )
 from services.stock_analyst import AnalysisResult
 from services.data_fetcher import CryptoQuote, DXYData, FXIntraday
-from ui.components import signal_card_html, section_title, verdict_badge, analysis_card
+from ui.components import (
+    signal_card_html, section_title, verdict_badge,
+    analysis_card_v2, entry_gauge_html,
+)
 
 
 def _html(s: str):
@@ -167,6 +170,20 @@ def render_signals(
     grid_html += '</div>'
     _html(grid_html)
 
+    # ── Entry Gauge Bars ────────────────────────────────────
+    gauge_items = []
+    for fx_sig, icon, label in [
+        (usd_split, "💵", "달러"),
+        (jpy_split, "💴", "엔화"),
+    ]:
+        if fx_sig and fx_sig.market_open and fx_sig.current > 0:
+            gauge_items.append(
+                entry_gauge_html(icon, label, fx_sig.entry_score, fx_sig.entry_rationale or "")
+            )
+    if gauge_items:
+        gauge_html = '<div class="eg-grid">' + "".join(gauge_items) + '</div>'
+        _html(gauge_html)
+
     # ── FX Split Level Details ────────────────────────────────
     for fx_sig, label in [(usd_split, "💵 달러"), (jpy_split, "💴 엔화")]:
         if fx_sig and fx_sig.market_open and fx_sig.current > 0:
@@ -209,11 +226,10 @@ def render_signals(
                     f'<span class="badge" style="background:{score_color};'
                     f'color:#000;font-weight:700;">{r.score}점</span> {badge}'
                 )
-                body_parts = []
-                if r.bull_summary:
-                    body_parts.append(f"<b>🟢 Bull:</b> {r.bull_summary[:300]}")
-                if r.bear_summary:
-                    body_parts.append(f"<b>🔴 Bear:</b> {r.bear_summary[:300]}")
-                if r.synthesis:
-                    body_parts.append(f"<b>⚖️ 종합:</b> {r.synthesis}")
-                analysis_card(header, "\n".join(body_parts))
+                analysis_card_v2(
+                    header,
+                    bull=r.bull_summary[:300] if r.bull_summary else "",
+                    bear=r.bear_summary[:300] if r.bear_summary else "",
+                    synthesis=r.synthesis or "",
+                    source=r.source or "ai",
+                )
