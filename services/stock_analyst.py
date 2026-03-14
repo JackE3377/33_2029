@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import streamlit as st
 
@@ -24,6 +26,21 @@ from services.data_fetcher import StockQuote
 from services.news_fetcher import NewsItem
 
 logger = logging.getLogger(__name__)
+
+
+# ── Strategy loader ───────────────────────────────────────────
+
+@lru_cache(maxsize=1)
+def _load_strategy() -> str:
+    """Load STRATEGY.md for AI prompt injection. Returns empty string if missing."""
+    cfg = get_settings()
+    path = os.path.join(os.path.dirname(os.path.dirname(__file__)), cfg.strategy_file)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.warning("STRATEGY.md not found at %s", path)
+        return ""
 
 
 @dataclass
@@ -233,18 +250,21 @@ def analyze_stock(
     ctx = _build_context(q, news)
 
     # Try AI pipeline — use lite model for bull/bear, full model for synthesis
+    strategy = _load_strategy()
+    strategy_block = f"\n\n## 투자 전략 컨텍스트\n{strategy}" if strategy else ""
+
     bull_text = _call_gemini(
         f"You are a bullish equity analyst. Analyse this stock and list 3-5 key "
         f"growth catalysts, competitive advantages, and positive signals "
         f"as numbered bullet points (one point per line, 1-2 sentences each). "
-        f"Be specific and cite data. Answer in Korean.\n\n{ctx}",
+        f"Be specific and cite data. Answer in Korean.{strategy_block}\n\n{ctx}",
         use_lite=True,
     )
     bear_text = _call_gemini(
         f"You are a bearish red-team analyst. Analyse this stock and list 3-5 key "
         f"risks, weaknesses, regulatory threats, and negative signals "
         f"as numbered bullet points (one point per line, 1-2 sentences each). "
-        f"Be specific and cite data. Answer in Korean.\n\n{ctx}",
+        f"Be specific and cite data. Answer in Korean.{strategy_block}\n\n{ctx}",
         use_lite=True,
     )
 
@@ -380,12 +400,15 @@ def analyze_screened_stocks_batch(
 
     logger.info("Batch AI: %d candidates (%s)", len(candidates), symbol_list)
 
+    strategy = _load_strategy()
+    strategy_block = f"\n\n## 투자 전략 컨텍스트\n{strategy}" if strategy else ""
+
     # ── Call 1: Bull Agent (lite model) ──
     bull_prompt = (
         f"You are a bullish equity analyst. For EACH of the following {len(candidates)} stocks, "
         f"list 3-5 key growth catalysts, competitive advantages, and positive signals "
         f"as numbered bullet points (one point per line, 1-2 sentences each). "
-        f"Be specific and cite data. Answer in Korean.\n\n"
+        f"Be specific and cite data. Answer in Korean.{strategy_block}\n\n"
         f"Respond ONLY as a JSON array (no markdown, no extra text):\n"
         f'[{{"symbol": "<TICKER>", "analysis": "<your bull analysis>"}}, ...]\n\n'
         f"{ctx}"
@@ -405,7 +428,7 @@ def analyze_screened_stocks_batch(
         f"You are a bearish red-team analyst. For EACH of the following {len(candidates)} stocks, "
         f"list 3-5 key risks, weaknesses, regulatory threats, and negative signals "
         f"as numbered bullet points (one point per line, 1-2 sentences each). "
-        f"Be specific and cite data. Answer in Korean.\n\n"
+        f"Be specific and cite data. Answer in Korean.{strategy_block}\n\n"
         f"Respond ONLY as a JSON array (no markdown, no extra text):\n"
         f'[{{"symbol": "<TICKER>", "analysis": "<your bear analysis>"}}, ...]\n\n'
         f"{ctx}"

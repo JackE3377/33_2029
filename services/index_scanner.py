@@ -33,6 +33,7 @@ class ScreenedStock:
     market_cap: Optional[float] = None
     weekly_rsi: Optional[float] = None
     rule_score: int = 50
+    track: str = ""              # "A", "B", or ""
 
 
 # ── Constituent Fetching ──────────────────────────────────────
@@ -106,12 +107,45 @@ def _calc_rsi(prices: pd.Series, period: int = 14) -> Optional[float]:
 
 # ── Rule Score ────────────────────────────────────────────────
 
+def _get_track(symbol: str) -> str:
+    """Return track classification: 'A', 'B', or '' (unclassified)."""
+    cfg = get_settings()
+    if symbol in cfg.track_a:
+        return "A"
+    if symbol in cfg.track_b:
+        return "B"
+    return ""
+
+
+def _death_check(
+    symbol: str,
+    fcf: Optional[float],
+    de: Optional[float],
+    mcap: Optional[float],
+) -> bool:
+    """Return True if stock FAILS death check (should be excluded)."""
+    cfg = get_settings()
+    # FCF 적자 = 즉시 탈락
+    if fcf is not None and fcf <= 0:
+        return True
+    # 시가총액 최소 기준 미달
+    if mcap is not None and mcap < cfg.market_cap_min:
+        return True
+    # Track A: D/E > 60% 탈락
+    track = _get_track(symbol)
+    if track == "A" and de is not None and de > cfg.debt_to_equity_max_a:
+        return True
+    return False
+
+
 def _calc_rule_score(
     rsi: Optional[float],
     drawdown_pct: float,
     pe: Optional[float],
     peg: Optional[float],
     fcf: Optional[float],
+    de: Optional[float] = None,
+    track: str = "",
 ) -> int:
     score = 50
     if rsi is not None:
@@ -125,20 +159,47 @@ def _calc_rule_score(
         score += 10
     elif drawdown_pct < -10:
         score += 5
-    if peg is not None:
-        if peg < 1.0:
-            score += 15
-        elif peg < 1.5:
-            score += 8
-        elif peg > 3.0:
-            score -= 10
-    if pe is not None:
-        if pe < 15:
-            score += 10
-        elif pe < 20:
+    # Track-aware scoring
+    if track == "A":
+        # 가치주: PE 중시
+        if pe is not None:
+            if pe < 15:
+                score += 15
+            elif pe < 20:
+                score += 5
+            elif pe > 35:
+                score -= 10
+        if de is not None and de <= 40:
             score += 5
-        elif pe > 35:
-            score -= 10
+    elif track == "B":
+        # 성장주: PEG 중시
+        if peg is not None:
+            if peg < 1.0:
+                score += 18
+            elif peg < 1.5:
+                score += 10
+            elif peg > 3.0:
+                score -= 10
+        # D/E > 200% 경고 (감점)
+        if de is not None and de > 200:
+            score -= 8
+    else:
+        # 미분류: 일반 로직
+        if peg is not None:
+            if peg < 1.0:
+                score += 15
+            elif peg < 1.5:
+                score += 8
+            elif peg > 3.0:
+                score -= 10
+        if pe is not None:
+            if pe < 15:
+                score += 10
+            elif pe < 20:
+                score += 5
+            elif pe > 35:
+                score -= 10
+    # FCF 흑자 보너스 (이미 death check 통과한 종목)
     if fcf is not None and fcf > 0:
         score += 5
     return max(0, min(100, score))
@@ -205,8 +266,12 @@ def screen_index_stocks(top_n: int = 30) -> list[ScreenedStock]:
         filtered = candidates[:top_n]
 
     # Phase 3: Fetch fundamentals for filtered candidates only
+    # Fetch more than top_n to allow for death-check removals
+    fetch_n = min(len(filtered), top_n * 3)
     results: list[ScreenedStock] = []
-    for c in filtered[:top_n]:
+    sector_count: dict[str, int] = {}  # sector diversity tracking
+
+    for c in filtered[:fetch_n]:
         sym = c["symbol"]
         try:
             info = yf.Ticker(sym).info or {}
@@ -219,8 +284,23 @@ def screen_index_stocks(top_n: int = 30) -> list[ScreenedStock]:
         de = info.get("debtToEquity")
         mcap = info.get("marketCap")
         name = info.get("shortName", sym)
+        sector = info.get("sector", "Unknown")
 
-        score = _calc_rule_score(c["rsi_14"], c["drawdown_pct"], pe, peg, fcf)
+        # Death Check: FCF적자, 시총미달, Track A D/E 초과 → 탈락
+        if _death_check(sym, fcf, de, mcap):
+            continue
+
+        # Sector diversity: 한 섹터 최대 max_per_sector 종목
+        cur = sector_count.get(sector, 0)
+        if cur >= cfg.max_per_sector:
+            continue
+        sector_count[sector] = cur + 1
+
+        track = _get_track(sym)
+        score = _calc_rule_score(
+            c["rsi_14"], c["drawdown_pct"], pe, peg, fcf,
+            de=de, track=track,
+        )
 
         results.append(ScreenedStock(
             symbol=sym, name=name,
@@ -229,7 +309,11 @@ def screen_index_stocks(top_n: int = 30) -> list[ScreenedStock]:
             forward_pe=pe, peg_ratio=peg,
             free_cash_flow=fcf, debt_to_equity=de,
             market_cap=mcap, rule_score=score,
+            track=track,
         ))
+
+        if len(results) >= top_n:
+            break
 
     results.sort(key=lambda r: r.rule_score, reverse=True)
     return results

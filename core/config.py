@@ -62,11 +62,26 @@ class Settings(BaseSettings):
     forward_pe_max: float = 15.0
     peg_max: float = 1.5
     rsi_entry: float = 30.0
+    debt_to_equity_max_a: float = 60.0    # Track A hard limit
+    debt_to_equity_warn_b: float = 200.0  # Track B warning threshold
+    market_cap_min: float = 1e10          # $10B minimum
+    max_per_sector: int = 2               # sector diversity cap
+    strategy_file: str = "STRATEGY.md"    # local strategy doc for AI injection
     watchlist: list[str] = Field(
         default_factory=lambda: [
             "PINS", "NVO", "PYPL", "GOOGL", "AMZN", "MSFT",
             "NVDA", "TSLA", "AMD", "PLTR", "MU", "UBER",
-            "NFLX", "ADBE", "AVGO", "IBM", "V", "NU",
+            "NFLX", "ADBE", "AVGO", "IBM", "V", "NU", "META",
+        ]
+    )
+    # Track classification: A=방어형 가치주, B=공격형 성장주
+    track_a: list[str] = Field(
+        default_factory=lambda: ["V", "PYPL", "IBM", "NU"]
+    )
+    track_b: list[str] = Field(
+        default_factory=lambda: [
+            "NVDA", "AMD", "AVGO", "MU", "GOOGL", "AMZN",
+            "MSFT", "TSLA", "PLTR", "NFLX", "ADBE", "UBER", "META",
         ]
     )
 

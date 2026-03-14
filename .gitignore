@@ -6,3 +6,4 @@ logs/
 .streamlit/secrets.toml
 .venv/
 venv/
+STRATEGY.md
