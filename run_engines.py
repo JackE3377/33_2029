@@ -69,7 +69,7 @@ except ImportError:
 from core.config import get_settings
 from services.cache_store import (
     FAST_SIGNALS, SLOW_STOCKS, WAREHOUSE,
-    save_result, cleanup_old,
+    save_result, cleanup_old, load_latest,
 )
 
 
@@ -106,6 +106,11 @@ def run_fast() -> None:
         cfg.fx_split_sell_interval_jpy, dxy=dxy,
     )
 
+    # Snapshot previous state for change detection
+    prev_fast = load_latest(FAST_SIGNALS, max_age_seconds=600)
+    prev_wh = load_latest(WAREHOUSE, max_age_seconds=600)
+    prev_slow = load_latest(SLOW_STOCKS, max_age_seconds=86400)
+
     payload = {
         "macro": asdict(macro),
         "crypto": asdict(crypto),
@@ -137,6 +142,19 @@ def run_fast() -> None:
 
     cleanup_old(FAST_SIGNALS)
     cleanup_old(WAREHOUSE)
+
+    # Telegram: notify signal changes
+    try:
+        from services.telegram_notifier import notify_signal_changes
+        if prev_fast is not None:
+            notify_signal_changes(
+                new_fast=payload, new_wh=wh_payload,
+                old_fast=prev_fast, old_wh=prev_wh,
+                old_slow=prev_slow, new_slow=prev_slow,
+            )
+    except Exception:
+        log.exception("Telegram signal notification failed")
+
     log.info("=== FAST group done ===")
 
 
@@ -207,6 +225,14 @@ def run_ai() -> None:
     save_result(SLOW_STOCKS, payload)
     cleanup_old(SLOW_STOCKS)
     log.info("AI group saved — %d screened, %d AI results", len(screened), len(ai_top))
+
+    # Telegram: send AI analysis results
+    try:
+        from services.telegram_notifier import notify_ai_results
+        notify_ai_results(payload["ai_top"])
+    except Exception:
+        log.exception("Telegram AI notification failed")
+
     log.info("=== AI group done ===")
 
 

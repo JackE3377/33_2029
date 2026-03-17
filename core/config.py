@@ -102,6 +102,10 @@ class Settings(BaseSettings):
     rebalance_deviation_pct: float = 5.0
     momentum_lookback_months: int = 12
 
+    # -- Telegram Push --
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
     # -- Auto-refresh (seconds) --
     refresh_interval_sec: int = 300
 
