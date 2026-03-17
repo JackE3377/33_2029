@@ -143,9 +143,13 @@ def _fmt_body(text: str, force_list: bool = False) -> str:
     if not raw_lines:
         return ""
 
-    # Detect numbered/bullet list: "1. ...", "1) ...", "- ...", "• ..."
-    bullet_re = _re.compile(r'^\s*(?:\d+[.)\-]|[-•▪▸])\s*')
-    number_only_re = _re.compile(r'^\s*\d+[.)\-]\s*$')
+    # Detect many list styles: "1.", "1)", "1:", "①", "-", "•", markdown-bolded forms.
+    bullet_re = _re.compile(
+        r'^\s*(?:\*\*|__)?\s*(?:\d+\s*[.)\-:]|[①②③④⑤⑥⑦⑧⑨⑩]|[-•▪▸])\s*(?:\*\*|__)?\s*'
+    )
+    number_only_re = _re.compile(
+        r'^\s*(?:\*\*|__)?\s*(?:\d+\s*[.)\-:]|[①②③④⑤⑥⑦⑧⑨⑩])\s*(?:\*\*|__)?\s*$'
+    )
 
     # Normalise "1." + next-line text into a single logical bullet line.
     normalized: list[str] = []
@@ -158,6 +162,13 @@ def _fmt_body(text: str, force_list: bool = False) -> str:
             continue
         normalized.append(line)
         i += 1
+
+    # If model returns one long line like "1. ... 2. ...", split it first.
+    if len(normalized) == 1:
+        one = normalized[0]
+        chunks = _re.split(r'\s+(?=(?:\d+\s*[.)\-:]|[①②③④⑤⑥⑦⑧⑨⑩])\s*)', one)
+        if len(chunks) >= 2:
+            normalized = [c.strip() for c in chunks if c.strip()]
 
     has_bullet = any(bullet_re.match(l) for l in normalized)
     as_list = force_list or has_bullet
