@@ -116,8 +116,8 @@ def analysis_card(title: str, body: str):
     )
 
 
-def _fmt_body(text: str) -> str:
-    """Format AI analysis text: detect bullets/numbered lists, highlight keywords."""
+def _fmt_body(text: str, force_list: bool = False) -> str:
+    """Format AI analysis text and normalise bullet/list structures."""
     import re as _re
 
     def _highlight(t: str) -> str:
@@ -139,28 +139,61 @@ def _fmt_body(text: str) -> str:
         )
         return t
 
-    lines = text.strip().split('\n')
+    raw_lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+    if not raw_lines:
+        return ""
+
     # Detect numbered/bullet list: "1. ...", "1) ...", "- ...", "• ..."
     bullet_re = _re.compile(r'^\s*(?:\d+[.)\-]|[-•▪▸])\s*')
-    bullet_lines = [l for l in lines if bullet_re.match(l)]
-    is_list = len(bullet_lines) >= 2
+    number_only_re = _re.compile(r'^\s*\d+[.)\-]\s*$')
 
-    if is_list:
-        items = []
-        for line in lines:
-            stripped = bullet_re.sub('', line).strip()
-            if stripped:
-                items.append(f'<li>{_highlight(stripped)}</li>')
-        return '<ul class="ac2-list">' + ''.join(items) + '</ul>'
-    else:
-        # Legacy prose: split on sentence endings
-        parts = _re.split(r'(?<=[.!?。])\s+', text.strip())
-        if len(parts) <= 1:
-            return _highlight(text)
-        return ''.join(
-            f'<p class="ac2-sent">{_highlight(p.strip())}</p>'
-            for p in parts if p.strip()
-        )
+    # Normalise "1." + next-line text into a single logical bullet line.
+    normalized: list[str] = []
+    i = 0
+    while i < len(raw_lines):
+        line = raw_lines[i]
+        if number_only_re.match(line) and i + 1 < len(raw_lines):
+            normalized.append(f"- {raw_lines[i + 1]}")
+            i += 2
+            continue
+        normalized.append(line)
+        i += 1
+
+    has_bullet = any(bullet_re.match(l) for l in normalized)
+    as_list = force_list or has_bullet
+
+    if as_list:
+        items: list[str] = []
+        cur = ""
+        for line in normalized:
+            if bullet_re.match(line):
+                if cur:
+                    items.append(cur)
+                cur = bullet_re.sub('', line).strip()
+            else:
+                if cur:
+                    # Continuation line: merge to remove wasted vertical space.
+                    cur = f"{cur} {line}".strip()
+                else:
+                    cur = line
+        if cur:
+            items.append(cur)
+
+        if not items:
+            items = normalized
+
+        return '<ul class="ac2-list">' + ''.join(
+            f'<li>{_highlight(it)}</li>' for it in items if it
+        ) + '</ul>'
+
+    # Legacy prose fallback for synthesis/summary blocks.
+    parts = _re.split(r'(?<=[.!?。])\s+', text.strip())
+    if len(parts) <= 1:
+        return _highlight(text)
+    return ''.join(
+        f'<p class="ac2-sent">{_highlight(p.strip())}</p>'
+        for p in parts if p.strip()
+    )
 
 
 def analysis_card_v2(
@@ -176,14 +209,14 @@ def analysis_card_v2(
         sections += (
             '<div class="ac2-sec ac2-bull">'
             '<div class="ac2-sec-title">🟢 Bull Agent</div>'
-            f'<div class="ac2-sec-body">{_fmt_body(bull)}</div>'
+            f'<div class="ac2-sec-body">{_fmt_body(bull, force_list=True)}</div>'
             '</div>'
         )
     if bear:
         sections += (
             '<div class="ac2-sec ac2-bear">'
             '<div class="ac2-sec-title">🔴 Bear Agent</div>'
-            f'<div class="ac2-sec-body">{_fmt_body(bear)}</div>'
+            f'<div class="ac2-sec-body">{_fmt_body(bear, force_list=True)}</div>'
             '</div>'
         )
     if synthesis:
