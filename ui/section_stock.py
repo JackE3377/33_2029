@@ -32,9 +32,11 @@ def render_stock_explorer(
         alert_info(f"{s.symbol} — {s.reason}")
 
     # ── AI Top 5 Analysis ─────────────────────────────────────
+    st.markdown("##### 🤖 AI Top 5 추천")
+    st.caption("Bull Agent + Bear Agent → Synthesis Agent (Gemini)")
+    st.caption(f"현재 AI 결과: {len(ai_results)}건")
+
     if ai_results:
-        st.markdown("##### 🤖 AI Top 5 추천")
-        st.caption("Bull Agent + Bear Agent → Synthesis Agent (Gemini)")
 
         for r in ai_results:
             badge = verdict_badge(r.verdict)
@@ -55,8 +57,10 @@ def render_stock_explorer(
                 synthesis=r.synthesis or "",
                 source=r.source or "ai",
             )
+    else:
+        alert_info("AI 분석 결과가 없습니다. `run_engines.py ai` 실행 후 새로고침(🔄) 해주세요.")
 
-        st.markdown("---")
+    st.markdown("---")
 
     # ── Watchlist Table ────────────────────────────────────────
     st.markdown("##### 📋 관심종목 현황")
